@@ -1,0 +1,44 @@
+# stsmell configuration. Copy to stsmell.toml at your project root.
+# Defaults are calibrated against the Pharo kernel; see README.
+
+# Only report findings at this severity or above: info | minor | major | critical
+min_severity = "info"
+
+# Glob patterns to skip (in addition to .git, node_modules, .venv, pharo-local)
+exclude = [
+    "*/Tests/*",
+    "*-Tests/*",
+]
+
+[rules.long-method]
+max_lines = 25
+
+[rules.complex-method]
+max_cyclo = 8
+
+[rules.long-parameter-list]
+max_params = 4
+
+[rules.deeply-nested-blocks]
+max_depth = 3
+
+[rules.message-chain]
+max_chain = 4
+
+[rules.feature-envy]
+min_foreign_sends = 5
+
+[rules.god-class]
+min_wmc = 47
+max_tcc = 0.33
+min_niv = 5
+
+[rules.large-class]
+max_methods = 40
+
+[rules.deep-inheritance]
+max_depth = 8
+
+# Turn a rule off entirely.
+[rules.cascade-abuse]
+enabled = false

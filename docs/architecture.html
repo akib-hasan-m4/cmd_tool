@@ -1,0 +1,1441 @@
+<title>Inside stsmell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  :root {
+    --bg:        #f1f4f3;
+    --surface:   #ffffff;
+    --surface-2: #e6ebe9;
+    --ink:       #14191a;
+    --ink-2:     #4d5957;
+    --ink-3:     #788582;
+    --rule:      #d2dad7;
+    --rule-2:    #bcc7c3;
+    --accent:    #0c6a68;
+    --accent-2:  #0a4f4e;
+    --accent-bg: #dcecea;
+    --sev-critical: #9c1f1c;
+    --sev-major:    #a1521a;
+    --sev-minor:    #7a6414;
+    --sev-info:     #2b6382;
+    --shadow: 0 1px 2px rgba(20,25,26,.06), 0 8px 24px -16px rgba(20,25,26,.28);
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --measure: 66ch;
+    --wide: 1000px;
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #0d1211;
+      --surface:   #151b1a;
+      --surface-2: #1d2523;
+      --ink:       #e3e9e7;
+      --ink-2:     #9daba7;
+      --ink-3:     #77837f;
+      --rule:      #283130;
+      --rule-2:    #384341;
+      --accent:    #52cfc3;
+      --accent-2:  #7fe0d6;
+      --accent-bg: #10302e;
+      --sev-critical: #f08a86;
+      --sev-major:    #e8a86a;
+      --sev-minor:    #d6c377;
+      --sev-info:     #86bcdc;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #0d1211;
+    --surface:   #151b1a;
+    --surface-2: #1d2523;
+    --ink:       #e3e9e7;
+    --ink-2:     #9daba7;
+    --ink-3:     #77837f;
+    --rule:      #283130;
+    --rule-2:    #384341;
+    --accent:    #52cfc3;
+    --accent-2:  #7fe0d6;
+    --accent-bg: #10302e;
+    --sev-critical: #f08a86;
+    --sev-major:    #e8a86a;
+    --sev-minor:    #d6c377;
+    --sev-info:     #86bcdc;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 18px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 0 32px 96px;
+  }
+
+  /* ---- shared column rhythm ---------------------------------------- */
+  .col { max-width: var(--measure); }
+  .flow > * + * { margin-top: 1.1em; }
+
+  /* ---- masthead ----------------------------------------------------- */
+  .masthead {
+    padding: 72px 0 40px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 20px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(40px, 7vw, 68px);
+    line-height: 1.02;
+    letter-spacing: -.025em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h1 .mono-title {
+    font-family: var(--mono);
+    font-weight: 700;
+    letter-spacing: -.04em;
+  }
+  .standfirst {
+    font-size: 21px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 54ch;
+    margin: 22px 0 0;
+  }
+  .masthead-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin-top: 32px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+  .masthead-meta b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---- section headings --------------------------------------------- */
+  .stage-head {
+    display: grid;
+    grid-template-columns: 68px 1fr;
+    align-items: baseline;
+    gap: 0;
+    margin: 72px 0 4px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule-2);
+  }
+  .stage-num {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: .04em;
+  }
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 31px;
+    line-height: 1.15;
+    letter-spacing: -.018em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .stage-head + .subhead {
+    margin: 0 0 22px 68px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-3);
+  }
+  .stage-body { margin-left: 68px; }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -.008em;
+    margin: 2.2em 0 .5em;
+    color: var(--ink);
+  }
+  h4 {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 2em 0 .6em;
+  }
+  p { margin: 0 0 1.05em; max-width: var(--measure); }
+  .stage-body p:last-child { margin-bottom: 0; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  code {
+    font-family: var(--mono);
+    font-size: .84em;
+    background: var(--surface-2);
+    padding: .12em .34em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  ul, ol { max-width: var(--measure); padding-left: 1.3em; margin: 0 0 1.05em; }
+  li { margin-bottom: .5em; }
+  li::marker { color: var(--ink-3); }
+
+  /* ---- code listings ------------------------------------------------ */
+  .listing {
+    margin: 1.6em 0;
+    max-width: 100%;
+  }
+  .listing-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 7px;
+  }
+  pre {
+    margin: 0;
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: 16px 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.62;
+    color: var(--ink);
+    tab-size: 4;
+  }
+  pre.term {
+    background: var(--surface-2);
+    border-left-color: var(--rule-2);
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); font-style: italic; }
+  pre .k { color: var(--accent); }
+  pre .hl { color: var(--sev-major); font-weight: 700; }
+
+  /* ---- tables -------------------------------------------------------- */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 1.7em 0;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 640px;
+    font-family: var(--display);
+    font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px 0;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--rule-2);
+    white-space: nowrap;
+  }
+  td {
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  tr:last-child td { border-bottom: none; }
+  td.id, td.num { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  td.num { text-align: right; }
+  td.thr { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+
+  .sev {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .sev::before {
+    content: "";
+    display: inline-block;
+    width: 3px; height: 10px;
+    margin-right: 7px;
+    vertical-align: -1px;
+    background: currentColor;
+  }
+  .sev-critical { color: var(--sev-critical); }
+  .sev-major    { color: var(--sev-major); }
+  .sev-minor    { color: var(--sev-minor); }
+  .sev-info     { color: var(--sev-info); }
+
+  /* ---- figures ------------------------------------------------------- */
+  figure {
+    margin: 2.2em 0;
+    max-width: 100%;
+  }
+  .fig-scroll { overflow-x: auto; }
+  figure svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    color: var(--ink-2);
+  }
+  figcaption {
+    font-family: var(--display);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-3);
+    margin-top: 12px;
+    max-width: 62ch;
+  }
+  figcaption b { color: var(--ink-2); font-weight: 600; }
+
+  /* ---- callouts ------------------------------------------------------ */
+  .note {
+    margin: 1.7em 0;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    max-width: var(--measure);
+  }
+  .note.warn { border-left-color: var(--sev-major); }
+  .note-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .note.warn .note-label { color: var(--sev-major); }
+  .note p { font-size: 16.5px; margin: 0; }
+  .note p + p { margin-top: .7em; }
+
+  /* ---- definition rows ----------------------------------------------- */
+  .defs {
+    margin: 1.6em 0;
+    border-top: 1px solid var(--rule);
+  }
+  .defs > div {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 4px 24px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .defs dt, .defs .dt {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .defs dd, .defs .dd {
+    margin: 0;
+    font-size: 16px;
+    color: var(--ink-2);
+    line-height: 1.55;
+  }
+  @media (max-width: 620px) {
+    .defs > div { grid-template-columns: 1fr; }
+  }
+
+  /* ---- module map ----------------------------------------------------- */
+  .modmap {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 1.8em 0;
+  }
+  .modmap section {
+    background: var(--surface);
+    padding: 16px 18px 18px;
+  }
+  .modmap h5 {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  .modmap ul { list-style: none; padding: 0; margin: 0; }
+  .modmap li {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    margin: 0 0 7px;
+    line-height: 1.35;
+  }
+  .modmap li span {
+    display: block;
+    font-family: var(--display);
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-top: 1px;
+  }
+
+  /* ---- trace ladder ---------------------------------------------------- */
+  .ladder { margin: 1.8em 0; border-top: 1px solid var(--rule-2); }
+  .ladder > div {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 20px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .ladder .step {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .ladder h4 { margin: 0 0 .4em; color: var(--ink); letter-spacing: .07em; }
+  .ladder p { font-size: 16px; margin: 0; color: var(--ink-2); }
+  .ladder pre { margin-top: .8em; font-size: 12px; }
+
+  hr.section-break {
+    border: none;
+    border-top: 2px solid var(--ink);
+    margin: 80px 0 0;
+  }
+
+  .appendix-mark {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  footer.colophon {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule-2);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    line-height: 1.7;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 700px) {
+    body { font-size: 17px; }
+    .page { padding: 0 20px 64px; }
+    .stage-head { grid-template-columns: 44px 1fr; }
+    .stage-body, .stage-head + .subhead { margin-left: 44px; }
+    h2 { font-size: 26px; }
+  }
+
+  /* ---- print ----------------------------------------------------------- */
+  @page { margin: 16mm 26mm; }
+  @media print {
+    :root {
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --surface-2: #f2f5f4;
+      --ink: #111514;
+      --ink-2: #3d4746;
+      --ink-3: #6b7674;
+      --rule: #d6dedb;
+      --rule-2: #b4bfbc;
+      --shadow: none;
+      --measure: none;
+    }
+    body { font-size: 10.5pt; line-height: 1.5; background: #fff; }
+    .page { max-width: none; padding: 0; }
+    .masthead { padding-top: 0; break-after: page; }
+    h1 { font-size: 34pt; }
+    .standfirst { font-size: 13pt; }
+    h2 { font-size: 17pt; }
+    h3 { font-size: 12pt; }
+    .stage-head { margin-top: 26pt; break-after: avoid; break-inside: avoid;
+                  grid-template-columns: 34px 1fr; }
+    .stage-body, .stage-head + .subhead { margin-left: 34px; }
+    figure svg { max-height: 200mm; width: auto; max-width: 100%; }
+    .stage-head + .subhead { break-after: avoid; }
+    h3, h4 { break-after: avoid; }
+    figure, .table-wrap, .note, .listing, .ladder > div, .modmap section { break-inside: avoid; }
+    pre { font-size: 8.4pt; line-height: 1.5; }
+    table { font-size: 8.6pt; min-width: 0; }
+    .table-wrap { overflow: visible; }
+    .fig-scroll { overflow: visible; }
+    figure svg { width: 100%; }
+    a { color: var(--ink); text-decoration: none; }
+    hr.section-break { break-before: page; margin-top: 0; }
+    footer.colophon { break-inside: avoid; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">Architecture &amp; control flow · v0.1.0</p>
+    <h1>Inside <span class="mono-title">stsmell</span></h1>
+    <p class="standfirst">How a Tonel file on disk becomes a code-smell finding on stdout — the eight stages, the data that moves between them, and the Smalltalk-specific decisions that shaped each one.</p>
+    <div class="masthead-meta">
+      <span><b>Package</b> stsmell 0.1.0</span>
+      <span><b>Language</b> Python ≥ 3.10</span>
+      <span><b>Parser</b> tree-sitter-tonel-smalltalk</span>
+      <span><b>Modules</b> 21</span>
+      <span><b>Rules</b> 18</span>
+    </div>
+  </header>
+
+  <!-- ================= ORIENTATION ================= -->
+  <div class="stage-head">
+    <span class="stage-num appendix-mark">§</span>
+    <h2>Orientation</h2>
+  </div>
+  <p class="subhead">what the tool is, and the one law the codebase obeys</p>
+
+  <div class="stage-body flow">
+    <p><code>stsmell</code> is a command-line code-smell detector for Pharo/Smalltalk. It reads <strong>Tonel</strong>-format source — the plain-file layout Pharo uses when a package is exported to Git — and reports findings as text, JSON or SARIF, exiting non-zero when it finds something.</p>
+
+    <p>That framing matters for the architecture. Pharo's own analysis tools, Moose and SmallLint, run <em>inside a live image</em>: they reflect over real class objects and real compiled methods. <code>stsmell</code> has no image. It has bytes on disk, a tree-sitter grammar, and whatever it can reconstruct from them. Every design decision downstream follows from that constraint — it must recover a usable model of a class hierarchy from a directory of text files, and it must be honest about what it could not recover.</p>
+
+    <h3>The layering law</h3>
+
+    <p>One rule governs the whole codebase, and it is worth internalising before reading any module: <strong>rules never touch the concrete syntax tree.</strong> Rules consume the extracted model plus precomputed numbers, nothing else. The docstring in <code>model.py</code> states it directly, and the module graph enforces it — only <code>parsing.py</code> and <code>extract.py</code> import <code>tree_sitter</code>.</p>
+
+    <p>The payoff is testability. A rule is a pure function from numbers to findings, so <code>tests/test_rules.py</code> can construct a <code>MethodMetrics</code> by hand and assert on the output without parsing anything. The cost is one deliberate exception, described below.</p>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 700 350" role="img" aria-label="Three stacked layers: the CST layer containing parsing.py and extract.py, the model and metrics layer, and the rules and report layer. Extraction flows downward; metrics may reach back up into the CST through MethodDef.body_node; rules have no path to the CST at all." xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ar1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+            </marker>
+            <marker id="ar1x" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--sev-major)"/>
+            </marker>
+          </defs>
+
+          <!-- band A: CST -->
+          <rect x="40" y="20" width="420" height="76" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="45" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">CST layer</text>
+          <text x="58" y="64" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">parsing.py · extract.py</text>
+          <text x="58" y="82" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">the only modules that import tree_sitter</text>
+
+          <!-- band B: model + metrics -->
+          <rect x="40" y="140" width="420" height="76" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="165" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Model + metrics</text>
+          <text x="58" y="184" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">model.py · metrics/*.py</text>
+          <text x="58" y="202" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">dataclasses in, plain numbers out</text>
+
+          <!-- band C: rules + report -->
+          <rect x="40" y="260" width="420" height="76" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="285" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Rules + report</text>
+          <text x="58" y="304" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">rules/*.py · report/*.py</text>
+          <text x="58" y="322" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">thresholds compared, findings emitted</text>
+
+          <!-- A -> B translate -->
+          <line x1="130" y1="98" x2="130" y2="136" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar1)"/>
+          <text x="140" y="122" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">extract_file()</text>
+
+          <!-- B -> A reach through -->
+          <line x1="368" y1="138" x2="368" y2="100" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar1a)"/>
+          <text x="378" y="122" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--accent)">body_node</text>
+
+          <!-- B -> C -->
+          <line x1="130" y1="218" x2="130" y2="256" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar1)"/>
+          <text x="140" y="242" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">MetricSuite</text>
+
+          <!-- C -> A blocked -->
+          <path d="M 462 298 L 500 298 L 500 58 L 466 58" fill="none" stroke="var(--sev-major)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar1x)"/>
+          <line x1="491" y1="169" x2="509" y2="187" stroke="var(--sev-major)" stroke-width="2"/>
+          <line x1="509" y1="169" x2="491" y2="187" stroke="var(--sev-major)" stroke-width="2"/>
+          <text x="524" y="167" font-family="Archivo, sans-serif" font-size="11.5" font-weight="600" fill="var(--sev-major)">no path</text>
+          <text x="524" y="183" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">rules read only</text>
+          <text x="524" y="198" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">metrics + model</text>
+        </svg>
+      </div>
+      <figcaption><b>The containment boundary.</b> Extraction translates the tree once, downward. Metric code is allowed a single reach back up — the <code>tree_sitter.Node</code> parked on <code>MethodDef.body_node</code> — because computing complexity requires walking the body. Rules get no such door.</figcaption>
+    </figure>
+
+    <h3>Module map</h3>
+
+    <div class="modmap">
+      <section>
+        <h5>Driver</h5>
+        <ul>
+          <li>cli.py<span>argparse, four subcommands, exit codes</span></li>
+          <li>analysis.py<span>the pipeline in fifteen lines</span></li>
+          <li>config.py<span>TOML discovery, thresholds, severity order</span></li>
+        </ul>
+      </section>
+      <section>
+        <h5>Front end</h5>
+        <ul>
+          <li>discovery.py<span>find Tonel files, apply excludes</span></li>
+          <li>parsing.py<span>tree-sitter setup, source normalisation</span></li>
+          <li>extract.py<span>CST → model translation</span></li>
+          <li>model.py<span>ClassDef, MethodDef, ParsedFile, Project</span></li>
+        </ul>
+      </section>
+      <section>
+        <h5>Measurement</h5>
+        <ul>
+          <li>selectors.py<span>the curated branching-selector sets</span></li>
+          <li>metrics/method.py<span>MLOC, CYCLO, NBLK, envy, chains</span></li>
+          <li>metrics/klass.py<span>WMC, TCC, CBO, accessor ratio</span></li>
+          <li>metrics/hierarchy.py<span>DIT, NOC, ancestors</span></li>
+          <li>metrics/suite.py<span>runs all three over a Project</span></li>
+        </ul>
+      </section>
+      <section>
+        <h5>Judgement</h5>
+        <ul>
+          <li>rules/base.py<span>Rule, Finding, the registry, run_rules</span></li>
+          <li>rules/method_rules.py<span>nine method-level smells</span></li>
+          <li>rules/class_rules.py<span>six class-level smells</span></li>
+          <li>rules/smalltalk_rules.py<span>three with no Java analogue</span></li>
+        </ul>
+      </section>
+      <section>
+        <h5>Output</h5>
+        <ul>
+          <li>report/text.py<span>ANSI-coloured terminal report</span></li>
+          <li>report/json_report.py<span>summary + findings</span></li>
+          <li>report/sarif.py<span>SARIF 2.1.0 for code scanning</span></li>
+        </ul>
+      </section>
+      <section>
+        <h5>Tests</h5>
+        <ul>
+          <li>test_extract.py<span>CST → model translation</span></li>
+          <li>test_metrics.py<span>model → numbers</span></li>
+          <li>test_rules.py<span>numbers → findings</span></li>
+          <li>test_cli.py<span>end to end, exit codes</span></li>
+          <li>fixtures/<span>one Tonel file per smell, plus clean/</span></li>
+        </ul>
+      </section>
+    </div>
+
+    <h3>The pipeline at a glance</h3>
+
+    <p>Everything below is a walk down this spine. The numbered sections of this document <em>are</em> these stages, in execution order; unnumbered sections after them are reference material rather than steps.</p>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 720 710" role="img" aria-label="Vertical pipeline of eight stages: dispatch in cli.py, configure in config.py, discover in discovery.py, parse in parsing.py, extract in extract.py, measure in metrics, judge in rules, report in report. Stages three through seven are bracketed as analysis.analyze. Arrows are labelled with the data type flowing between stages, ending in stdout and an exit code." xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <!-- 1 -->
+          <rect x="40" y="14" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="45" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">1</text>
+          <text x="80" y="36" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Dispatch</text>
+          <text x="80" y="53" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">cli.main() → args.func</text>
+          <line x1="200" y1="66" x2="200" y2="94" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="84" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">Namespace</text>
+
+          <!-- 2 -->
+          <rect x="40" y="96" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="127" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">2</text>
+          <text x="80" y="118" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Configure</text>
+          <text x="80" y="135" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">find_config() → load_config()</text>
+          <line x1="200" y1="148" x2="200" y2="176" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="166" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">Config</text>
+
+          <!-- 3 -->
+          <rect x="40" y="178" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="209" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">3</text>
+          <text x="80" y="200" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Discover</text>
+          <text x="80" y="217" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">discovery.discover()</text>
+          <line x1="200" y1="230" x2="200" y2="258" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="248" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">list[Path]</text>
+
+          <!-- 4 -->
+          <rect x="40" y="260" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="291" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">4</text>
+          <text x="80" y="282" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Parse</text>
+          <text x="80" y="299" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">parsing.parse_file()</text>
+          <line x1="200" y1="312" x2="200" y2="340" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="330" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">bytes + Tree</text>
+
+          <!-- 5 -->
+          <rect x="40" y="342" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="373" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">5</text>
+          <text x="80" y="364" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Extract</text>
+          <text x="80" y="381" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">extract.extract_file()</text>
+          <line x1="200" y1="394" x2="200" y2="422" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="412" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">Project</text>
+
+          <!-- 6 -->
+          <rect x="40" y="424" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="455" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">6</text>
+          <text x="80" y="446" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Measure</text>
+          <text x="80" y="463" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">metrics.compute_metrics()</text>
+          <line x1="200" y1="476" x2="200" y2="504" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="494" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">MetricSuite</text>
+
+          <!-- 7 -->
+          <rect x="40" y="506" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="537" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">7</text>
+          <text x="80" y="528" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Judge</text>
+          <text x="80" y="545" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">rules.run_rules()</text>
+          <line x1="200" y1="558" x2="200" y2="586" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="372" y="576" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">list[Finding]</text>
+
+          <!-- 8 -->
+          <rect x="40" y="588" width="320" height="52" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="56" y="619" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--accent)">8</text>
+          <text x="80" y="610" font-family="Archivo, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">Report</text>
+          <text x="80" y="627" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-3)">render_text / _json / _sarif</text>
+          <line x1="200" y1="640" x2="200" y2="666" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar2)"/>
+          <text x="200" y="690" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">stdout · exit 0 / 1 / 2</text>
+
+          <!-- analyze() bracket over 3..7 -->
+          <path d="M 500 178 L 490 178 L 490 558 L 500 558" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+          <line x1="490" y1="368" x2="502" y2="368" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="510" y="364" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--accent)">analysis.</text>
+          <text x="510" y="379" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--accent)">analyze()</text>
+        </svg>
+      </div>
+      <figcaption><b>The spine.</b> Stages 1–2 belong to the CLI; stages 3–7 are the reusable core, wrapped by <code>analysis.analyze()</code> so any embedder gets the same pipeline without argparse; stage 8 turns the result into bytes and an exit status.</figcaption>
+    </figure>
+
+    <div class="listing">
+      <p class="listing-label">src/stsmell/analysis.py — the whole pipeline</p>
+<pre><code>def analyze(root: Path, config: Optional[Config] = None) -&gt; AnalysisResult:
+    config = (config or Config()).with_defaults(registry())
+    project, parse_errors, read_errors = build_project(root, config)
+    suite = compute_metrics(project)
+    findings = run_rules(suite, config)
+    return AnalysisResult(...)</code></pre>
+    </div>
+  </div>
+
+  <!-- ================= STAGE 1 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">01</span>
+    <h2>Dispatch</h2>
+  </div>
+  <p class="subhead">src/stsmell/cli.py</p>
+
+  <div class="stage-body flow">
+    <p>The entry point declared in <code>pyproject.toml</code> is <code>stsmell = "stsmell.cli:main"</code>. <code>main()</code> builds the parser, parses <code>argv</code>, and hands off to the function that the chosen subparser stashed on the namespace with <code>set_defaults(func=...)</code>. There is no dispatch table and no <code>if/elif</code> chain — the subparser <em>is</em> the dispatch.</p>
+
+    <p>Four subcommands exist. Three of them — <code>analyze</code>, <code>metrics</code>, <code>baseline</code> — take the same positional path plus <code>-c/--config</code> and repeatable <code>-e/--exclude</code>, shared through a local <code>add_common(sub)</code> helper. The fourth, <code>rules</code>, takes no path because it inspects the registry rather than any source.</p>
+
+    <div class="defs">
+      <div><span class="dt">analyze</span><span class="dd">Run the pipeline and report findings. Adds <code>-f/--format</code> (text · json · sarif), <code>--min-severity</code> and <code>--baseline</code>.</span></div>
+      <div><span class="dt">metrics</span><span class="dd">Run the same pipeline but dump the raw metric layer instead of findings. Adds <code>-f/--format</code> (csv · json) and <code>-s/--scope</code> (method · class). This is the calibration tool.</span></div>
+      <div><span class="dt">rules</span><span class="dd">List every registered rule with its severity, description and active thresholds. Reads no source.</span></div>
+      <div><span class="dt">baseline</span><span class="dd">Freeze today's findings to a JSON file so that later runs report only what is new. Adds <code>-o/--output</code>.</span></div>
+    </div>
+
+    <h3>Exit codes and error handling</h3>
+
+    <p>The three exit codes are module constants, and they are the contract CI depends on:</p>
+
+    <div class="defs">
+      <div><span class="dt">EXIT_OK = 0</span><span class="dd">No findings survived filtering — or the command was informational (<code>metrics</code>, <code>rules</code>, <code>baseline</code>), which always succeed.</span></div>
+      <div><span class="dt">EXIT_FINDINGS = 1</span><span class="dd">At least one finding at or above <code>min_severity</code> remains. This is what fails a pull request.</span></div>
+      <div><span class="dt">EXIT_ERROR = 2</span><span class="dd">A bad config or a missing path. Distinct from 1 so a pipeline can tell "smells found" from "the tool broke".</span></div>
+    </div>
+
+    <p><code>main()</code> wraps the dispatch in a small <code>try</code> that converts <code>ConfigError</code> and <code>FileNotFoundError</code> into a message on stderr plus exit 2. It also catches <code>BrokenPipeError</code> and returns 0 — that is the <code>stsmell analyze src/ | head</code> case, where the downstream process closing the pipe is normal, not a failure.</p>
+
+    <div class="note">
+      <span class="note-label">Note</span>
+      <p>Per-file read failures are <em>not</em> errors. <code>build_project()</code> catches <code>OSError</code> and <code>UnicodeDecodeError</code> per path, collects them into <code>result.read_errors</code>, and keeps going. <code>cmd_analyze</code> prints them to stderr after the report so they never corrupt machine-readable stdout.</p>
+    </div>
+  </div>
+
+  <!-- ================= STAGE 2 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">02</span>
+    <h2>Configure</h2>
+  </div>
+  <p class="subhead">src/stsmell/config.py · cli._load()</p>
+
+  <div class="stage-body flow">
+    <p>Configuration is resolved before any file is opened, and it is assembled from three sources with a strict precedence order.</p>
+
+    <p>Discovery comes first. Unless <code>-c</code> names a file explicitly, <code>find_config()</code> walks <em>upward from the analysed path</em> — not from the current working directory — looking for <code>stsmell.toml</code> or <code>.stsmell.toml</code>. Analysing <code>src/Kernel/</code> inside a checkout therefore picks up the config at the repository root, exactly as a developer expects.</p>
+
+    <div class="listing">
+      <p class="listing-label">src/stsmell/config.py</p>
+<pre><code>def find_config(start: Path) -&gt; Optional[Path]:
+    start = start.resolve()
+    candidates = [start] if start.is_dir() else [start.parent]
+    candidates.extend(candidates[0].parents)
+    for directory in candidates:
+        for name in CONFIG_FILENAMES:          <span class="c"># stsmell.toml, .stsmell.toml</span>
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
+    return None</code></pre>
+    </div>
+
+    <p><code>load_config()</code> then parses it with <code>tomllib</code> (with a <code>tomli</code> fallback for Python 3.10), validating as it goes: an unknown <code>min_severity</code>, a <code>[rules]</code> key that is not a table, or malformed TOML each raise <code>ConfigError</code> and become exit code 2. Back in <code>cli._load()</code>, command-line flags are layered on top — <code>--exclude</code> patterns are <em>appended</em> to whatever the file listed, while <code>--min-severity</code> <em>replaces</em> it.</p>
+
+    <p>The last layer is applied inside <code>analyze()</code>, not the CLI: <code>Config.with_defaults(registry())</code> walks every registered rule and fills in that rule's declared <code>defaults</code> dict for any threshold the user did not set, plus <code>enabled = True</code>. This is why a rule's defaults live on the rule class rather than in a central table — a new rule ships its own thresholds and needs no edit anywhere else.</p>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 700 250" role="img" aria-label="Three stacked precedence bands. At the bottom, Rule.defaults declared on each rule class. In the middle, stsmell.toml found by walking up from the analysed path. At the top, CLI flags. Higher bands override lower ones, and no CLI flag can set a rule threshold." xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+            </marker>
+          </defs>
+
+          <rect x="40" y="16" width="470" height="56" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="58" y="40" font-family="Archivo, sans-serif" font-size="13.5" font-weight="600" fill="var(--ink)">CLI flags</text>
+          <text x="58" y="58" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">--min-severity · -e/--exclude · -c/--config</text>
+
+          <rect x="40" y="88" width="470" height="56" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="112" font-family="Archivo, sans-serif" font-size="13.5" font-weight="600" fill="var(--ink)">stsmell.toml</text>
+          <text x="58" y="130" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">min_severity · exclude · [rules.&lt;id&gt;] thresholds · enabled</text>
+
+          <rect x="40" y="160" width="470" height="56" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="184" font-family="Archivo, sans-serif" font-size="13.5" font-weight="600" fill="var(--ink)">Rule.defaults</text>
+          <text x="58" y="202" font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-2)">declared on each Rule subclass · applied by with_defaults()</text>
+
+          <line x1="546" y1="212" x2="546" y2="24" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#ar3)"/>
+          <text x="560" y="110" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--accent)">higher</text>
+          <text x="560" y="126" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--accent)">wins</text>
+        </svg>
+      </div>
+      <figcaption><b>Three layers, one direction.</b> Note the asymmetry: the TOML layer is the only one that can change a rule threshold or disable a rule. There is deliberately no <code>--max-lines</code> flag — thresholds are project policy and belong in a file under version control.</figcaption>
+    </figure>
+
+    <div class="note warn">
+      <span class="note-label">Gotcha</span>
+      <p><code>stsmell rules</code> does not run <code>find_config()</code>. It takes no path argument, so with no <code>-c</code> it constructs an empty <code>Config()</code> and reports the built-in defaults — even when a <code>stsmell.toml</code> sits in the working directory. To see the thresholds a project will actually apply, pass the file: <code>stsmell rules -c stsmell.toml</code>.</p>
+    </div>
+  </div>
+
+  <!-- ================= STAGE 3 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">03</span>
+    <h2>Discover</h2>
+  </div>
+  <p class="subhead">src/stsmell/discovery.py</p>
+
+  <div class="stage-body flow">
+    <p>The smallest module in the tool, and the first one inside <code>analyze()</code>. <code>discover(root, excludes)</code> returns a sorted list of Tonel files. If <code>root</code> is itself a file it short-circuits, returning <code>[root]</code> when it qualifies and <code>[]</code> otherwise — that is what makes <code>stsmell analyze path/to/One.class.st</code> work with no special case upstream.</p>
+
+    <p>Otherwise it walks <code>root.rglob("*.st")</code> and keeps what passes two tests. <code>is_tonel_file()</code> checks the compound suffix against <code>(".class.st", ".trait.st", ".extension.st")</code> and explicitly rejects <code>package.st</code>, the Tonel package marker that carries no class or method. <code>_excluded()</code> then applies <code>fnmatch</code> against the union of <code>DEFAULT_EXCLUDES</code> — <code>.git</code>, <code>node_modules</code>, <code>.venv</code>, <code>pharo-local</code> — and any user patterns.</p>
+
+    <p>The result is sorted, which is not cosmetic: it makes findings deterministically ordered for a given tree, so baselines and CI diffs stay stable across runs and across machines.</p>
+  </div>
+
+  <!-- ================= STAGE 4 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">04</span>
+    <h2>Parse</h2>
+  </div>
+  <p class="subhead">src/stsmell/parsing.py</p>
+
+  <div class="stage-body flow">
+    <p><code>parse_file()</code> reads the file as <strong>bytes</strong>, normalises it, and returns <code>(source, tree)</code>. Bytes rather than <code>str</code> throughout, because tree-sitter reports node positions as byte offsets; <code>node_text()</code> slices the same buffer and decodes with <code>errors="replace"</code> at the last moment.</p>
+
+    <p>The grammar and parser are built once and cached with <code>functools.lru_cache(maxsize=1)</code>. Loading a tree-sitter language is not free, and the pipeline parses thousands of files in one run.</p>
+
+    <h3>Normalisation that preserves byte offsets</h3>
+
+    <p>This is the most quietly clever part of the module. Traits mark class-side methods with <code>classSide &gt;&gt;</code> where classes use <code>class &gt;&gt;</code>, and the upstream grammar only accepts the latter — so trait files would fail to parse. <code>normalize_source()</code> rewrites the keyword before parsing.</p>
+
+    <p>The subtlety is the replacement: <code>classSide</code> (9 characters) becomes <code>class</code> plus <em>four spaces</em> (also 9 characters). Every byte offset after the rewrite is identical to the original file's, so every line and column tree-sitter reports still points at the right place in the source the user actually has on disk. A naive replacement would shift every subsequent offset and silently corrupt reported line numbers.</p>
+
+    <div class="listing">
+      <p class="listing-label">src/stsmell/parsing.py</p>
+<pre><code>_CLASS_SIDE_RE = re.compile(
+    rb"(^|\n)([A-Za-z_][A-Za-z0-9_]*)([ \t]+)classSide([ \t]*&gt;&gt;)"
+)
+_CLASS_SIDE_REPLACEMENT = rb"\1\2\3class    \4"   <span class="c"># 'class' + 4 spaces == 'classSide'</span></code></pre>
+    </div>
+
+    <h3>Errors are recorded, not fatal</h3>
+
+    <p><code>has_error(tree)</code> reports whether tree-sitter hit a syntax error. Crucially, <code>extract_file()</code> records this as a flag on <code>ParsedFile.parse_error</code> and carries on. tree-sitter recovers locally, so the rest of a partially-broken file still yields usable classes and methods. <code>build_project()</code> collects those paths and every report surfaces the count rather than hiding it — measured on the Pharo kernel at roughly 0.16% of files (14 of 8,864), caused by known upstream grammar gaps such as argument-only blocks and nested literal arrays.</p>
+  </div>
+
+  <!-- ================= STAGE 5 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">05</span>
+    <h2>Extract</h2>
+  </div>
+  <p class="subhead">src/stsmell/extract.py · src/stsmell/model.py</p>
+
+  <div class="stage-body flow">
+    <p><code>extract_file()</code> walks the top-level children of the root node exactly once, maintaining one piece of state, and builds the dataclasses everything downstream consumes.</p>
+
+    <p>A Tonel file has a distinctive shape: an optional double-quoted class comment, then a STON map describing the class, then a run of method definitions. The extractor mirrors that shape directly.</p>
+
+    <div class="defs">
+      <div><span class="dt">class_comment</span><span class="dd">Held in a <code>pending_comment</code> local and attached to the <em>next</em> definition seen, then cleared. The comment precedes the definition in Tonel, so it cannot be read as a child of it.</span></div>
+      <div><span class="dt">definition</span><span class="dd">Dispatched through <code>_DEFINITION_KINDS</code> to <code>_build_class()</code>, which reads the STON header. An unwrapped definition node is tolerated as well.</span></div>
+      <div><span class="dt">method_definition</span><span class="dd">Built by <code>_build_method()</code>, then routed to its owning class by <code>_target_class()</code>.</span></div>
+    </div>
+
+    <h3>Reading the STON header</h3>
+
+    <p>Three small helpers do all the work. <code>_ston_pairs()</code> turns the map into <code>{key: value_node}</code> with the leading <code>#</code> stripped from each symbol key; <code>_ston_scalar()</code> unwraps a string, symbol or number; <code>_ston_list()</code> handles <code>#instVars : [ 'a' 'b' ]</code>, degrading gracefully to a single-element list when the value is a bare scalar.</p>
+
+    <p>One compatibility detail lives here. Tonel 3.0 replaced <code>#category</code> on class definitions with the pair <code>#package</code> + <code>#tag</code>, so <code>_build_class()</code> reads <code>package = scalar("package") or scalar("category")</code> and <code>category = scalar("category") or scalar("tag")</code> — both generations of the format land in the same fields.</p>
+
+    <h3>Reconstructing selectors</h3>
+
+    <p>A keyword method reference carries one <code>selector</code> field per keyword part. <code>_selector_of()</code> concatenates them, which is what turns the parsed fragments of <code>Account &gt;&gt; deposit: amount into: target</code> back into the selector <code>deposit:into:</code>. The parameters come from the parallel <code>param</code> fields, and <code>class_side</code> is simply whether the reference has a <code>class_side</code> child.</p>
+
+    <h3>Orphan methods get a home</h3>
+
+    <p><code>_target_class()</code> matches a method to the class whose name it names. When nothing matches — a mismatched or renamed reference — and there is exactly one definition in the file, Tonel's one-type-per-file guarantee makes that the sensible target. When there is no definition at all, as in an <code>.extension.st</code> file, <code>extract_file()</code> synthesises a <code>ClassDef(kind="extension")</code> holder so the method is still measured and still judged, rather than silently disappearing.</p>
+
+    <div class="note">
+      <span class="note-label">Why ParsedFile keeps the tree</span>
+      <p><code>ParsedFile</code> stores the <code>tree</code> object even though nothing reads it directly. tree-sitter <code>Node</code>s are views into their <code>Tree</code>: if the tree is garbage-collected, every <code>MethodDef.body_node</code> derived from it becomes invalid. Holding the tree for the lifetime of the <code>Project</code> is what keeps stage 6 able to walk method bodies at all.</p>
+    </div>
+
+    <h3>The model</h3>
+
+    <p>Four dataclasses, deliberately plain. <code>MethodDef</code> carries the selector, params, temporaries, pragmas, category, path, line span, raw source and <code>body_node</code>, plus a <code>qualified_name</code> property that renders <code>Account class &gt;&gt; new</code> — the form Smalltalk developers actually read, and the string used as a finding's stable identity. <code>ClassDef</code> carries the STON header fields, the comment, a <code>kind</code> of <code>class</code>/<code>trait</code>/<code>extension</code>, and its methods, with <code>instance_methods</code> / <code>class_methods</code> views. <code>Project</code> is the whole run: <code>classes</code>, <code>methods</code> and <code>class_names()</code> flatten across every file, and that last one is what makes coupling measurable only against classes actually present in the analysed source.</p>
+  </div>
+
+  <!-- ================= INTERLUDE ================= -->
+  <div class="stage-head">
+    <span class="stage-num appendix-mark">§</span>
+    <h2>Interlude: there is no control flow to count</h2>
+  </div>
+  <p class="subhead">src/stsmell/selectors.py</p>
+
+  <div class="stage-body flow">
+    <p>Before stage 6 makes sense, one property of the language has to be on the table, because it invalidates the standard way of computing half these metrics.</p>
+
+    <p><strong>Smalltalk has no control-flow syntax.</strong> There is no <code>if</code>, no <code>while</code>, no <code>for</code>, no <code>switch</code>. Every branch and every loop is an ordinary message send that happens to take block arguments:</p>
+
+    <div class="listing">
+      <p class="listing-label">Smalltalk — conditionals and loops are just messages</p>
+<pre><code>x &gt; 0
+    ifTrue: [ self grow ]
+    ifFalse: [ self shrink ].
+
+1 to: 10 do: [ :i | self step: i ].</code></pre>
+    </div>
+
+    <p>Cyclomatic complexity in a C-family language is computed by counting keywords. Here there are no keywords to count — <code>ifTrue:ifFalse:</code> is a selector on <code>Boolean</code>, indistinguishable at the syntax level from <code>printOn:</code>. So complexity has to be computed by recognising a <em>curated set of selectors</em> on message-send nodes. That set is <code>selectors.py</code>, and it is the conceptual heart of the tool:</p>
+
+    <div class="table-wrap">
+      <table>
+        <caption>The four sets that union into BRANCHING</caption>
+        <thead><tr><th>Set</th><th>Size</th><th>Representative members</th></tr></thead>
+        <tbody>
+          <tr><td class="id">CONDITIONAL</td><td class="num">21</td><td class="thr">ifTrue: · ifNil:ifNotNil: · caseOf:otherwise: · at:ifAbsent: · detect:ifNone:</td></tr>
+          <tr><td class="id">BOOLEAN</td><td class="num">2</td><td class="thr">and: · or: — short-circuit, so each adds a path</td></tr>
+          <tr><td class="id">LOOPING</td><td class="num">23</td><td class="thr">whileTrue: · to:do: · timesRepeat: · collect: · inject:into:</td></tr>
+          <tr><td class="id">EXCEPTIONAL</td><td class="num">5</td><td class="thr">on:do: · ensure: · ifCurtailed: · on:fork:</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The module carries three more sets used elsewhere in the pipeline: <code>ABSTRACT_MARKERS</code> (<code>subclassResponsibility</code>, <code>shouldBeImplemented</code>, <code>notYetImplemented</code>), which identify a method that refuses to implement itself; <code>SELF_RECEIVERS</code> (<code>self</code>, <code>super</code>, <code>thisContext</code>), which mark a receiver as <em>not</em> foreign; and the node-type sets that let metric code tell a message send from a cascaded one.</p>
+
+    <p>Everything in stage 6 that looks like a syntactic judgement is really a lookup against one of these sets.</p>
+  </div>
+
+  <!-- ================= STAGE 6 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">06</span>
+    <h2>Measure</h2>
+  </div>
+  <p class="subhead">src/stsmell/metrics/</p>
+
+  <div class="stage-body flow">
+    <p><code>compute_metrics(project)</code> runs in a fixed order, because the later steps depend on the earlier ones. First the inheritance graph over the whole project; then, per class, one <code>MethodMetrics</code> per method; then the <code>ClassMetrics</code> that aggregates those method numbers together with the hierarchy and the set of known class names.</p>
+
+    <h3>Hierarchy — what a depth of 1 means</h3>
+
+    <p><code>Hierarchy.build()</code> indexes every non-extension class by name, records children per superclass, notes superclasses that were never defined in <code>unresolved</code>, and computes a depth for each class.</p>
+
+    <p>The definition of depth is a deliberate choice worth stating plainly: <code>_compute_depth()</code> counts <em>links walked until the chain leaves the project</em>. A class whose superclass is <code>Object</code> — which lives in the Pharo image, not in the analysed source — has depth 1. The walk simply stops rather than guessing how deep the external hierarchy runs, and a <code>seen</code> set guards against a malformed cyclic hierarchy. The consequence: DIT is a measure of inheritance depth <em>you own</em>, which is the number a project can actually act on.</p>
+
+    <h3>Method metrics — one walk, many counters</h3>
+
+    <p><code>compute_method_metrics()</code> makes a single <code>walk(body)</code> pass and accumulates everything from it. The interesting parts are the corrections, each of which exists because the naive version was wrong:</p>
+
+    <div class="defs">
+      <div><span class="dt">MLOC</span><span class="dd"><code>_code_lines()</code> collects line numbers from <em>leaf</em> nodes only, skipping <code>comment</code> nodes, and returns the size of the set. Counting <code>end_line − start_line</code> would include blank lines and comment blocks; counting all nodes would double-count.</span></div>
+      <div><span class="dt">CYCLO</span><span class="dd">Starts at 1 and adds one for every message whose selector is in <code>BRANCHING</code>. No syntax involved.</span></div>
+      <div><span class="dt">NBLK</span><span class="dd"><code>_block_depth()</code> recurses tracking maximum nesting of <code>block</code> nodes — which, given the interlude, is the Smalltalk equivalent of nested <code>if</code>/<code>for</code> bodies.</span></div>
+      <div><span class="dt">MAXCHAIN</span><span class="dd"><code>_chain_length()</code> counts sends stacked on one another by following the <code>receiver</code> field. <code>_chain_base()</code> finds the root of the chain, and <code>FOREIGN_MAXCHAIN</code> records the longest chain <em>not</em> rooted at self or super — the Law-of-Demeter number.</span></div>
+      <div><span class="dt">NOAV</span><span class="dd">Distinct lowercase identifiers accessed. Guarded by a precomputed <code>declared_ids</code> set so that the names inside a <code>| a b |</code> temporaries declaration count as declarations, not accesses, and do not inflate the number.</span></div>
+    </div>
+
+    <p>Two shape detectors run after the walk. <code>_detect_accessor()</code> recognises exactly the two canonical forms — a single <code>^ ivar</code> return with no parameters, or a single <code>ivar := arg</code> assignment with exactly one parameter whose name matches — and requires that the name really is an instance variable of this class. <code>_detect_abstract()</code> recognises a body that is a single send of an <code>ABSTRACT_MARKERS</code> selector to <code>self</code>, with or without a caret. Both feed cohesion and both feed rules.</p>
+
+    <p>A second short walk sets <code>calls_super_same_selector</code>, looking for a <code>super</code>-receiver send of the method's own selector — the classic override-and-extend shape.</p>
+
+    <h3>Class metrics — and the cohesion measure</h3>
+
+    <p>Most of <code>compute_class_metrics()</code> is aggregation: NOM and NOCM count methods, WMC sums method complexity, CLOC sums method lines, NIV counts instance variables, DIT and NOC come from the hierarchy. CBO is the one with a twist — the classes referenced across all methods, <em>intersected with the project's own class names</em> and minus the class itself, so referencing <code>OrderedCollection</code> from the image does not inflate coupling.</p>
+
+    <p>TCC, tight class cohesion, is the subtle one. It is the fraction of eligible method pairs that touch at least one instance variable in common:</p>
+
+    <div class="listing">
+      <p class="listing-label">src/stsmell/metrics/klass.py</p>
+<pre><code>eligible = [
+    m for m in metrics
+    if not m.is_accessor and not m.is_abstract and not m.method.class_side
+]
+if len(eligible) &lt; 2:
+    return None
+pairs = list(combinations(eligible, 2))
+connected = sum(1 for a, b in pairs if a.accessed_ivars &amp; b.accessed_ivars)
+return connected / len(pairs)</code></pre>
+    </div>
+
+    <p>Accessors and abstract methods are excluded because they trivially touch one variable or none and would otherwise dominate the score in either direction. Below two eligible methods the measure is undefined, and the code returns <code>None</code> rather than a misleading zero — which is precisely why the <code>god-class</code> rule opens with <code>if cm.tcc is None: return</code>. A class too small to have a cohesion score is not a god class.</p>
+  </div>
+
+  <!-- ================= STAGE 7 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">07</span>
+    <h2>Judge</h2>
+  </div>
+  <p class="subhead">src/stsmell/rules/</p>
+
+  <div class="stage-body flow">
+    <p>A rule is a subclass of <code>Rule</code> that declares an <code>id</code>, <code>name</code>, <code>severity</code>, <code>description</code> and a <code>defaults</code> dict, and overrides one of three hooks. The base class returns an empty tuple from all three, so a rule only implements the level it cares about.</p>
+
+    <div class="defs">
+      <div><span class="dt">check_method(mm, cm, ctx)</span><span class="dd">Once per method, with its class's metrics alongside.</span></div>
+      <div><span class="dt">check_class(cm, ctx)</span><span class="dd">Once per class.</span></div>
+      <div><span class="dt">check_project(ctx)</span><span class="dd">Once per run, with the whole <code>MetricSuite</code> reachable through <code>ctx</code>. Only <code>extension-sprawl</code> uses it, because it aggregates across packages.</span></div>
+    </div>
+
+    <p>Registration is by decorator: <code>@register</code> instantiates the class and appends it to a module-level list. <code>rules/__init__.py</code> imports the three rule modules purely for that side effect, so importing the package populates the registry. Threshold lookup goes through <code>self.opt(ctx, name)</code>, which reads the merged config and falls back to the rule's own default — a rule never reads <code>Config</code> directly.</p>
+
+    <figure>
+      <div class="fig-scroll">
+        <svg viewBox="0 0 700 372" role="img" aria-label="The run_rules dispatch: first check_project once per run, then for each class metrics object check_class, then nested inside that for each method metrics object check_method, and finally a sort of all findings by descending severity then file, line and rule id." xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <rect x="40" y="16" width="450" height="44" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="58" y="35" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="var(--accent)">1</text>
+          <text x="78" y="35" font-family="JetBrains Mono, monospace" font-size="12" fill="var(--ink)">rule.check_project(ctx)</text>
+          <text x="78" y="51" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">once per run — extension-sprawl only</text>
+
+          <!-- class loop container -->
+          <rect x="40" y="76" width="450" height="200" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <text x="58" y="97" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">for cm in suite.classes:</text>
+
+          <rect x="66" y="108" width="400" height="40" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="82" y="133" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="var(--accent)">2</text>
+          <text x="102" y="133" font-family="JetBrains Mono, monospace" font-size="12" fill="var(--ink)">rule.check_class(cm, ctx)</text>
+
+          <!-- method loop container -->
+          <rect x="66" y="162" width="400" height="96" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4"/>
+          <text x="84" y="183" font-family="JetBrains Mono, monospace" font-size="11.5" fill="var(--ink-2)">for mm in cm.method_metrics:</text>
+
+          <rect x="92" y="194" width="348" height="40" fill="var(--surface)" stroke="currentColor" stroke-width="1.5"/>
+          <text x="108" y="219" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="var(--accent)">3</text>
+          <text x="128" y="219" font-family="JetBrains Mono, monospace" font-size="12" fill="var(--ink)">rule.check_method(mm, cm, ctx)</text>
+
+          <line x1="265" y1="276" x2="265" y2="300" stroke="currentColor" stroke-width="1.5" marker-end="url(#ar4)"/>
+
+          <rect x="40" y="302" width="450" height="44" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="58" y="321" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="var(--accent)">4</text>
+          <text x="78" y="321" font-family="JetBrains Mono, monospace" font-size="12" fill="var(--ink)">sort by (-severity_rank, file, line, rule)</text>
+          <text x="78" y="337" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">worst first, then stable by location</text>
+
+          <text x="510" y="120" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">Every active rule is</text>
+          <text x="510" y="136" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">offered every level.</text>
+          <text x="510" y="158" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">The base class returns</text>
+          <text x="510" y="174" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">an empty tuple for the</text>
+          <text x="510" y="190" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">levels a rule ignores,</text>
+          <text x="510" y="206" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">so there is no registry</text>
+          <text x="510" y="222" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">of which rule is which.</text>
+        </svg>
+      </div>
+      <figcaption><b>Dispatch order.</b> <code>run_rules()</code> filters to rules the config leaves enabled, then walks project → class → method. The final sort puts critical findings first and is fully determined by <code>(severity, file, line, rule id)</code>, so output is reproducible run to run.</figcaption>
+    </figure>
+
+    <h3>The rule catalogue</h3>
+
+    <p>Eighteen rules across three modules. The last three have no direct Java analogue — they exist because Smalltalk has failure modes that Java-derived linters have never needed to name.</p>
+
+    <div class="table-wrap">
+      <table>
+        <caption>rules/method_rules.py — evaluated per method</caption>
+        <thead><tr><th>Rule id</th><th>Severity</th><th>Fires when</th><th>Defaults</th></tr></thead>
+        <tbody>
+          <tr><td class="id">long-method</td><td><span class="sev sev-major">major</span></td><td>MLOC exceeds the limit</td><td class="thr">max_lines = 25</td></tr>
+          <tr><td class="id">complex-method</td><td><span class="sev sev-major">major</span></td><td>CYCLO exceeds the limit</td><td class="thr">max_cyclo = 8</td></tr>
+          <tr><td class="id">deeply-nested-blocks</td><td><span class="sev sev-major">major</span></td><td>NBLK exceeds the limit</td><td class="thr">max_depth = 3</td></tr>
+          <tr><td class="id">feature-envy</td><td><span class="sev sev-major">major</span></td><td>top foreign receiver ≥ minimum <em>and</em> &gt; self sends</td><td class="thr">min_foreign_sends = 5</td></tr>
+          <tr><td class="id">long-parameter-list</td><td><span class="sev sev-minor">minor</span></td><td>PARAMS exceeds the limit</td><td class="thr">max_params = 4</td></tr>
+          <tr><td class="id">too-many-temporaries</td><td><span class="sev sev-minor">minor</span></td><td>TEMPS exceeds the limit</td><td class="thr">max_temps = 6</td></tr>
+          <tr><td class="id">message-chain</td><td><span class="sev sev-minor">minor</span></td><td>FOREIGN_MAXCHAIN exceeds the limit</td><td class="thr">max_chain = 4</td></tr>
+          <tr><td class="id">uses-this-context</td><td><span class="sev sev-minor">minor</span></td><td>the body references <code>thisContext</code></td><td class="thr">—</td></tr>
+          <tr><td class="id">cascade-abuse</td><td><span class="sev sev-info">info</span></td><td>MAX_CASCADE exceeds the limit</td><td class="thr">max_cascade = 6</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <caption>rules/class_rules.py — evaluated per class</caption>
+        <thead><tr><th>Rule id</th><th>Severity</th><th>Fires when</th><th>Defaults</th></tr></thead>
+        <tbody>
+          <tr><td class="id">god-class</td><td><span class="sev sev-critical">critical</span></td><td>all three conditions hold at once</td><td class="thr">min_wmc = 47 · max_tcc = 0.33 · min_niv = 5</td></tr>
+          <tr><td class="id">large-class</td><td><span class="sev sev-major">major</span></td><td>NOM exceeds the limit</td><td class="thr">max_methods = 40</td></tr>
+          <tr><td class="id">refused-bequest</td><td><span class="sev sev-major">major</span></td><td>an inherited selector is overridden with <code>subclassResponsibility</code></td><td class="thr">—</td></tr>
+          <tr><td class="id">data-class</td><td><span class="sev sev-minor">minor</span></td><td>all three conditions hold at once</td><td class="thr">min_accessor_ratio = 0.8 · min_methods = 5 · min_ivars = 2</td></tr>
+          <tr><td class="id">deep-inheritance</td><td><span class="sev sev-minor">minor</span></td><td>DIT exceeds the limit</td><td class="thr">max_depth = 8</td></tr>
+          <tr><td class="id">high-coupling</td><td><span class="sev sev-minor">minor</span></td><td>CBO exceeds the limit</td><td class="thr">max_cbo = 15</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <caption>rules/smalltalk_rules.py — no Java analogue</caption>
+        <thead><tr><th>Rule id</th><th>Severity</th><th>Fires when</th><th>Defaults</th></tr></thead>
+        <tbody>
+          <tr><td class="id">extension-sprawl</td><td><span class="sev sev-major">major</span></td><td>a package exceeds <em>either</em> limit, project-wide</td><td class="thr">max_extended_classes = 10 · max_extension_methods = 30</td></tr>
+          <tr><td class="id">missing-class-comment</td><td><span class="sev sev-minor">minor</span></td><td>a class or trait has no class comment</td><td class="thr">—</td></tr>
+          <tr><td class="id">god-class-side</td><td><span class="sev sev-minor">minor</span></td><td>NOCM exceeds the limit</td><td class="thr">max_class_methods = 15</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The Smalltalk-native three are worth a sentence each. <strong>extension-sprawl</strong> is the only project-level rule: Pharo lets any package attach methods to any class, and at scale that makes behaviour impossible to locate, so the rule aggregates per package and flags monkey-patching by volume. <strong>missing-class-comment</strong> exists because Pharo treats the class comment as the primary documentation of a class's purpose and the community enforces its presence. <strong>god-class-side</strong> catches the Smalltalk shape of a static-utility dumping ground — behaviour piled onto the metaclass instead of instances.</p>
+  </div>
+
+  <!-- ================= STAGE 8 ================= -->
+  <div class="stage-head">
+    <span class="stage-num">08</span>
+    <h2>Filter and report</h2>
+  </div>
+  <p class="subhead">cli.cmd_analyze() · src/stsmell/report/</p>
+
+  <div class="stage-body flow">
+    <p>Back in <code>cmd_analyze</code>, the findings pass two filters before rendering — in this order, which matters.</p>
+
+    <h3>Baseline subtraction</h3>
+
+    <p><code>_load_baseline()</code> reads a JSON file written earlier by <code>stsmell baseline</code> and builds a set of <code>(rule, entity)</code> pairs. Any finding whose <code>key()</code> is in that set is dropped.</p>
+
+    <p>The key is deliberately <em>line-independent</em>. <code>Finding.key()</code> returns <code>(self.rule, self.entity)</code> — and <code>entity</code> is the qualified name, <code>Account &gt;&gt; deposit:</code>, not a file position. Editing a file above a known-smelly method shifts its line number; had the key included the line, every such edit would resurrect the whole baseline as new findings. This way a suppressed smell stays suppressed until the method is renamed or fixed.</p>
+
+    <h3>Severity floor</h3>
+
+    <p>Then <code>SEVERITY_ORDER[config.min_severity]</code> gives an integer floor and anything below it is dropped. The order is <code>info</code> 0, <code>minor</code> 1, <code>major</code> 2, <code>critical</code> 3, and the default is <code>info</code> — so by default nothing is filtered. Because this runs <em>after</em> baseline subtraction, the exit code reflects exactly what was printed.</p>
+
+    <h3>Three renderers</h3>
+
+    <div class="defs">
+      <div><span class="dt">render_text</span><span class="dd">Groups by file, prints line, severity, message and rule id, with the entity on a dimmed second line, then a summary counting findings by severity plus files, classes and methods scanned. Colour is ANSI, enabled only when the stream is a TTY and <code>NO_COLOR</code> is unset. Paths are printed relative to the analysed root.</span></div>
+      <div><span class="dt">render_json</span><span class="dd">A <code>summary</code> object (files, classes, methods, findings, parse errors, read errors), the list of parse-error paths, and every finding with its <code>metrics</code> dict — the numbers that triggered it, so a consumer can re-check the judgement.</span></div>
+      <div><span class="dt">render_sarif</span><span class="dd">SARIF 2.1.0 for GitHub code scanning. Emits rule metadata for the rules that actually fired, and locations as root-relative POSIX URIs.</span></div>
+    </div>
+
+    <p>Two details in the SARIF writer are easy to miss. SARIF has three levels where <code>stsmell</code> has four severities, so <code>_LEVEL</code> maps both <code>critical</code> and <code>major</code> onto <code>error</code>, <code>minor</code> onto <code>warning</code> and <code>info</code> onto <code>note</code>. And the message joins entity and text with an em dash rather than a colon — because keyword selectors already end in one, and <code>classify:: complexity is 11</code> reads as a typo.</p>
+
+    <h3>The other three commands</h3>
+
+    <p><code>cmd_metrics</code> runs the identical pipeline but ignores findings, emitting <code>as_dict()</code> rows for either scope. CSV field names are taken from the first row's keys via <code>csv.DictWriter</code>, so adding a metric to <code>as_dict()</code> automatically adds a column. This is the command you use to recalibrate thresholds against your own codebase rather than inheriting the Pharo-kernel defaults.</p>
+
+    <p><code>cmd_rules</code> prints or serialises the registry. <code>cmd_baseline</code> writes <code>{version, findings:[{rule, entity, message}]}</code> — note it stores no line numbers, matching the key design above — to a file, or to stdout when <code>-o</code> is omitted, with the confirmation line going to stderr so redirecting stdout yields clean JSON.</p>
+  </div>
+
+  <hr class="section-break">
+
+  <!-- ================= WORKED TRACE ================= -->
+  <div class="stage-head">
+    <span class="stage-num appendix-mark">§</span>
+    <h2>A finding, end to end</h2>
+  </div>
+  <p class="subhead">tests/fixtures/smelly/ComplexMethodExample.class.st</p>
+
+  <div class="stage-body flow">
+    <p>All output below is real, produced by the version of the tool in this repository. The input is one fixture file:</p>
+
+    <div class="listing">
+      <p class="listing-label">the source</p>
+<pre><code>"I contain one method with far too many branches."
+Class {
+	#name : 'ComplexMethodExample',
+	#superclass : 'Object',
+	#instVars : [ 'value' ],
+	#package : 'Smelly-Core'
+}
+
+{ #category : 'evaluating' }
+ComplexMethodExample &gt;&gt; classify: input [
+	input isNil ifTrue: [ ^ #none ].
+	input isString ifTrue: [ ^ #string ].
+	input isNumber ifTrue: [ ^ #number ].
+	input isSymbol ifTrue: [ ^ #symbol ].
+	(input isArray and: [ input isEmpty ]) ifTrue: [ ^ #emptyArray ].
+	(input isArray or: [ input isDictionary ]) ifTrue: [ ^ #collection ].
+	input isCharacter ifTrue: [ ^ #character ].
+	input isBoolean ifTrue: [ ^ #boolean ].
+	^ #unknown
+]</code></pre>
+    </div>
+
+    <div class="ladder">
+      <div>
+        <span class="step">3</span>
+        <div>
+          <h4>Discover</h4>
+          <p>The path ends in <code>.class.st</code>, so <code>is_tonel_file()</code> accepts it. Given directly as <code>root</code>, <code>discover()</code> short-circuits and returns a one-element list.</p>
+        </div>
+      </div>
+      <div>
+        <span class="step">4</span>
+        <div>
+          <h4>Parse</h4>
+          <p>No <code>classSide &gt;&gt;</code> appears, so <code>normalize_source()</code> returns the bytes unchanged. <code>has_error()</code> is false — the file parses cleanly.</p>
+        </div>
+      </div>
+      <div>
+        <span class="step">5</span>
+        <div>
+          <h4>Extract</h4>
+          <p>The leading string becomes <code>pending_comment</code> and attaches to the class. The STON map yields <code>name</code>, <code>superclass</code>, <code>instVars = ['value']</code> and <code>package</code>. <code>_selector_of()</code> reconstructs the selector <code>classify:</code> with one parameter <code>input</code>; <code>_target_class()</code> matches it to the class by name.</p>
+        </div>
+      </div>
+      <div>
+        <span class="step">6</span>
+        <div>
+          <h4>Measure</h4>
+          <p>One walk of the body produces the numbers below. CYCLO is <strong>1 + 8 <code>ifTrue:</code> + 1 <code>and:</code> + 1 <code>or:</code> = 11</strong>; the ten unary predicates (<code>isNil</code>, <code>isString</code>, …) are not in <code>BRANCHING</code> and contribute nothing. All ten of those unary sends go to <code>input</code>, a parameter and therefore an envy candidate, while nothing is sent to <code>self</code>.</p>
+          <div class="listing">
+            <p class="listing-label">$ stsmell metrics …ComplexMethodExample.class.st --format json</p>
+<pre class="term"><code>"MLOC": 9,          "CYCLO": 11,        "MSG": 20,
+"PARAMS": 1,        "TEMPS": 0,         "NBLK": 1,
+"MAXCHAIN": 2,      "FOREIGN_MAXCHAIN": 2,
+"NOAV": 1,          "MAX_CASCADE": 0,   "SELF_SENDS": 0,
+"TOP_FOREIGN": "input",                 "TOP_FOREIGN_SENDS": 10,
+"IS_ACCESSOR": false,                   "IS_ABSTRACT": false</code></pre>
+          </div>
+        </div>
+      </div>
+      <div>
+        <span class="step">7</span>
+        <div>
+          <h4>Judge</h4>
+          <p>Two rules fire. <code>complex-method</code>: CYCLO 11 &gt; 8. <code>feature-envy</code>: 10 foreign sends ≥ 5 and 10 &gt; 0 self sends. Everything else stays quiet — MLOC 9 is under 25, PARAMS 1 is under 4, NBLK 1 is under 3, and <code>god-class</code> returns immediately because TCC is <code>None</code> for a single-method class.</p>
+        </div>
+      </div>
+      <div>
+        <span class="step">8</span>
+        <div>
+          <h4>Report</h4>
+          <p>Both findings are <code>major</code>, so they sort together and pass the default <code>info</code> floor. The process exits 1.</p>
+          <div class="listing">
+            <p class="listing-label">$ stsmell analyze tests/fixtures/</p>
+<pre class="term"><code>smelly/ComplexMethodExample.class.st
+      9     major  cyclomatic complexity is 11 (limit 8)  [complex-method]
+         ComplexMethodExample &gt;&gt; classify:
+      9     major  sends 10 messages to 'input' but only 0 to self  [feature-envy]
+         ComplexMethodExample &gt;&gt; classify:</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note warn">
+      <span class="note-label">Read the second finding critically</span>
+      <p>The <code>feature-envy</code> hit here is defensible but arguable: <code>classify:</code> is a type dispatch, not delegation, and the "move this method onto <code>input</code>" advice implied by the smell is not actionable when <code>input</code> is <code>Object</code>. This is the honest shape of threshold-based analysis — the metric is correct, the inference is a heuristic. It is also a good illustration of why <code>stsmell baseline</code> exists.</p>
+    </div>
+  </div>
+
+  <!-- ================= CALIBRATION ================= -->
+  <div class="stage-head">
+    <span class="stage-num appendix-mark">§</span>
+    <h2>Where the numbers came from</h2>
+  </div>
+  <p class="subhead">calibration, and two rules that were deliberately weakened</p>
+
+  <div class="stage-body flow">
+    <p>The thresholds are not imported from a Java linter. They were derived by running the metric layer over the Pharo kernel — 8,864 classes, 91,273 methods — and reading the distribution:</p>
+
+    <div class="table-wrap">
+      <table>
+        <caption>Pharo kernel distribution · defaults sit around p95–p99</caption>
+        <thead><tr><th>Metric</th><th>median</th><th>p90</th><th>p95</th><th>p99</th><th>max</th><th>default threshold</th></tr></thead>
+        <tbody>
+          <tr><td class="id">MLOC</td><td class="num">2</td><td class="num">9</td><td class="num">13</td><td class="num">26</td><td class="num">1961</td><td class="thr">&gt; 25</td></tr>
+          <tr><td class="id">CYCLO</td><td class="num">1</td><td class="num">3</td><td class="num">4</td><td class="num">7</td><td class="num">38</td><td class="thr">&gt; 8</td></tr>
+          <tr><td class="id">PARAMS</td><td class="num">0</td><td class="num">2</td><td class="num">2</td><td class="num">4</td><td class="num">15</td><td class="thr">&gt; 4</td></tr>
+          <tr><td class="id">NBLK</td><td class="num">0</td><td class="num">1</td><td class="num">2</td><td class="num">3</td><td class="num">8</td><td class="thr">&gt; 3</td></tr>
+          <tr><td class="id">NOM</td><td class="num">4</td><td class="num">24</td><td class="num">39</td><td class="num">91</td><td class="num">812</td><td class="thr">&gt; 40</td></tr>
+          <tr><td class="id">WMC</td><td class="num">6</td><td class="num">35</td><td class="num">62</td><td class="num">150</td><td class="num">1520</td><td class="thr">≥ 47</td></tr>
+          <tr><td class="id">DIT</td><td class="num">5</td><td class="num">7</td><td class="num">8</td><td class="num">9</td><td class="num">12</td><td class="thr">&gt; 8</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Two rows carry most of the argument. <strong>The median Pharo method is two lines long</strong> — a Java-style 50-line threshold would never fire, which is why <code>max_lines</code> is 25 and still stricter than it looks. And <strong>the median class already sits at DIT 5</strong>, deep in a hierarchy that a Java codebase would consider pathological, which is why <code>deep-inheritance</code> has to tolerate 8.</p>
+
+    <p>Percentile calibration defines <em>normal</em>, not <em>good</em>: the Pharo kernel contains genuinely old and genuinely smelly code, and the defaults inherit that. <code>stsmell metrics</code> exists so a project can redo this exercise against its own source.</p>
+
+    <h3>Two ports that were wrong, and what replaced them</h3>
+
+    <p>The same re-derivation applies to detection logic, not just numbers. Two rules were deliberately narrowed after being tested against the kernel.</p>
+
+    <p><strong>Refused Bequest.</strong> The standard Java heuristic is "a subclass never touches its inherited fields". In Smalltalk that misfires catastrophically, because idiomatic code reaches inherited state through accessors — <code>self origin</code>, not <code>origin</code> — so the variable name never appears. On the Pharo corpus the heuristic produced <strong>3,707 findings against 16 real ones</strong>. The implemented rule keeps only the precise, unambiguous form: a subclass that overrides an inherited selector with <code>subclassResponsibility</code>. It also returns early when the superclass is not in the analysed source, because it genuinely cannot tell. The infrastructure for the rejected heuristic is still there — <code>Hierarchy.inherited_ivars()</code> — but nothing calls it.</p>
+
+    <p><strong>Feature Envy.</strong> Counting every send to a non-<code>self</code> receiver blames the method for objects it built itself: <code>parts := OrderedCollection new. parts add: … </code> looks like five sends to a foreign receiver. Two restrictions fix it. Only instance variables and parameters are envy candidates, so locals the method constructed are excluded; and binary sends are skipped entirely, because <code>amount &gt; 0</code> is arithmetic, not delegation. A send to a capitalised global is also excluded — that is construction.</p>
+
+    <div class="listing">
+      <p class="listing-label">src/stsmell/metrics/method.py — the envy candidate test</p>
+<pre><code>receiver = _receiver(node)
+if receiver is not None:
+    if receiver.type in SELF_RECEIVERS:
+        m.self_sends += 1
+    elif receiver.type == "identifier" and kind != "binary_message":
+        name = node_text(receiver, source).strip()
+        if name in ivars or name in envy_names:      <span class="c"># envy_names == params</span>
+            m.foreign_sends[name] += 1</code></pre>
+    </div>
+  </div>
+
+  <!-- ================= EXTENDING ================= -->
+  <div class="stage-head">
+    <span class="stage-num appendix-mark">§</span>
+    <h2>Extending and testing</h2>
+  </div>
+
+  <div class="stage-body flow">
+    <h3>Adding a rule</h3>
+
+    <p>Four steps, no central registration to edit. Subclass <code>Rule</code> in whichever of the three rule modules fits; declare <code>id</code>, <code>name</code>, <code>severity</code>, <code>description</code> and <code>defaults</code>; decorate with <code>@register</code>; override the one hook you need and <code>yield</code> findings through <code>self.method_finding()</code> or <code>self.class_finding()</code>, which fill in entity, file and line from the model.</p>
+
+    <div class="listing">
+      <p class="listing-label">the shape of a rule</p>
+<pre><code>@register
+class TooManyTemporaries(Rule):
+    id = "too-many-temporaries"
+    name = "Too Many Temporaries"
+    severity = "minor"
+    description = "Many temporary variables suggest the method does several jobs."
+    defaults = {"max_temps": 6}
+
+    def check_method(self, mm, cm, ctx) -&gt; Iterable[Finding]:
+        limit = self.opt(ctx, "max_temps")
+        if mm.temps &gt; limit:
+            yield self.method_finding(
+                mm, f"declares {mm.temps} temporaries (limit {limit})",
+                TEMPS=mm.temps, limit=limit,
+            )</code></pre>
+    </div>
+
+    <p>The keyword arguments become the finding's <code>metrics</code> dict, which surfaces in JSON output. Include the observed value and the limit — that is what lets a reader check the verdict without rerunning the tool. If the rule needs a metric that does not exist yet, add it to <code>MethodMetrics</code> or <code>ClassMetrics</code> and to the matching <code>as_dict()</code>, and it appears as a new <code>stsmell metrics</code> column for free.</p>
+
+    <h3>The test suite</h3>
+
+    <p>57 tests, layered the same way the code is, so a failure localises immediately.</p>
+
+    <div class="defs">
+      <div><span class="dt">tests/test_extract.py</span><span class="dd">CST → model. Selector reconstruction, class-side detection, STON fields, comments, orphan methods.</span></div>
+      <div><span class="dt">tests/test_metrics.py</span><span class="dd">Model → numbers. Complexity counting, accessor and abstract detection, cohesion, hierarchy depth.</span></div>
+      <div><span class="dt">tests/test_rules.py</span><span class="dd">Numbers → findings. Constructs metrics directly, no parsing — this is the layering law paying off.</span></div>
+      <div><span class="dt">tests/test_cli.py</span><span class="dd">End to end. Formats, exit codes, config resolution, baseline suppression.</span></div>
+      <div><span class="dt">tests/fixtures/</span><span class="dd">Real Tonel files, one per smell, plus <code>clean/</code> to catch false positives — the fixture set is the regression suite for precision.</span></div>
+    </div>
+
+    <div class="listing">
+      <p class="listing-label">$ .venv/bin/python -m pytest tests/ -q</p>
+<pre class="term"><code>.........................................................                [100%]
+57 passed in 0.19s</code></pre>
+    </div>
+
+    <h3>Known limitations</h3>
+
+    <ul>
+      <li><strong>Tonel only.</strong> The older <code>!</code>-chunk fileOut format is not supported.</li>
+      <li><strong>Roughly 0.16% of Pharo kernel files fail to fully parse</strong> (14 of 8,864) due to upstream grammar gaps: argument-only blocks such as <code>[ :a ]</code>, <code>##literal</code> bindings, non-ASCII symbols, nested literal arrays. tree-sitter recovers, the rest of each file is still analysed, and the count is always reported rather than hidden.</li>
+      <li><strong>No image, so no send resolution.</strong> Coupling is name-based and confined to classes present in the analysed source; a selector cannot be resolved to an implementation the way it could inside a live Pharo image.</li>
+      <li><strong>Trait <code>classSide &gt;&gt;</code> is rewritten before parsing.</strong> Offsets are preserved exactly, so reported positions stay correct.</li>
+    </ul>
+  </div>
+
+  <footer class="colophon">
+    stsmell 0.1.0 · architecture and control flow<br>
+    Every code excerpt, metric value and terminal transcript in this document was taken from the source and from live runs of the tool in this repository.
+  </footer>
+
+</div>

@@ -1,0 +1,18 @@
+# virtualenv -- has absolute paths baked in, never share it
+.venv/
+
+# python bytecode
+__pycache__/
+*.py[cod]
+
+# packaging / build output
+*.egg-info/
+build/
+dist/
+
+# test + tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# docs/build-pdf.sh scratch (architecture.pdf itself is committed)
+docs/.build/
