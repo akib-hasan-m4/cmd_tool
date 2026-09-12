@@ -10,6 +10,14 @@ from .base import Finding, Rule, register
 
 @register
 class MissingClassComment(Rule):
+    """Class ships without the documentation Pharo expects every class to have.
+
+    No metric and no threshold: reads ``klass.comment``, the string literal
+    preceding the ``Class {`` definition in the Tonel file, and fires when it is
+    absent or blank. Classes and traits only -- an extension file documents
+    nothing of its own.
+    """
+
     id = "missing-class-comment"
     name = "Missing Class Comment"
     severity = "minor"
@@ -31,6 +39,14 @@ class MissingClassComment(Rule):
 
 @register
 class GodClassSide(Rule):
+    """The metaclass has grown into a utility bag of static-style helpers.
+
+    Metric: NOCM (number of class-side methods -- those declared
+    ``Foo class >> bar``). Counted separately from NOM because instance-side
+    size and class-side size are different design problems.
+    Breaks when NOCM > max_class_methods.
+    """
+
     id = "god-class-side"
     name = "God Class Side"
     severity = "minor"
@@ -53,6 +69,16 @@ class GodClassSide(Rule):
 
 @register
 class ExtensionSprawl(Rule):
+    """A package monkey-patches foreign classes on a scale that hides behaviour.
+
+    The one project-scoped rule: it implements ``check_project`` rather than
+    ``check_class``, since the unit of judgement is the package, not any single
+    file. Tallies, per package, how many distinct extended classes and how many
+    extension methods it contributes.
+    Breaks when either count exceeds its limit -- max_extended_classes or
+    max_extension_methods.
+    """
+
     id = "extension-sprawl"
     name = "Extension Sprawl"
     severity = "major"

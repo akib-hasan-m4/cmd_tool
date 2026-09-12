@@ -11,13 +11,60 @@ text, JSON or SARIF, and returns a non-zero exit code when it finds something.
 
 ## Install
 
+On Linux, install the prerequisites first. Debian and Ubuntu ship `venv` as a
+separate package from the interpreter, so `python3 -m venv` fails with a
+"ensurepip is not available" message until you add it:
+
 ```bash
+sudo apt install -y git python3 python3-venv        # Debian, Ubuntu
+sudo dnf install -y git python3                     # Fedora, RHEL
+sudo pacman -S --needed git python                  # Arch
+sudo apk add git python3 build-base python3-dev     # Alpine (musl — needs the toolchain)
+```
+
+Then clone and install. This is the same on Linux, macOS and Windows:
+
+```bash
+git clone https://github.com/akib-hasan-m4/cmd_tool.git stsmell
+cd stsmell
+
 python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
+Then check it works. This uses the bundled fixtures, so it needs no Pharo
+checkout — expect 10 findings and exit code 1:
+
+```bash
+.venv/bin/stsmell --version
+.venv/bin/stsmell analyze tests/fixtures/
+```
+
+Activate the environment to drop the `.venv/bin/` prefix, which is what every
+example below assumes:
+
+```bash
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+stsmell analyze tests/fixtures/
+```
+
 Requires Python 3.10+. The two dependencies (`tree-sitter`,
-`tree-sitter-tonel-smalltalk`) ship prebuilt wheels — no C compiler needed.
+`tree-sitter-tonel-smalltalk`) ship prebuilt wheels for Linux, macOS and Windows
+on x86-64 and arm64 — no C compiler needed. Two exceptions: on Python 3.10
+exactly, TOML config also needs `pip install tomli` (3.11+ has `tomllib` built
+in); and musl systems such as Alpine have no wheel, so pip builds the grammar
+from source and needs a toolchain.
+
+Never copy a `.venv/` between machines — it hardcodes absolute interpreter paths
+and will fail in confusing ways. Recreate it with the two commands above.
+
+To install it as a standalone command instead of working on the source, build a
+wheel and hand that to `pipx`:
+
+```bash
+.venv/bin/pip wheel --no-deps -w dist .
+pipx install dist/stsmell-0.1.0-py3-none-any.whl   # puts `stsmell` on PATH
+```
 
 ## Use
 

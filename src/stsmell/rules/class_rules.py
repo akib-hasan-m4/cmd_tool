@@ -9,6 +9,17 @@ from .base import Finding, Rule, register
 
 @register
 class GodClass(Rule):
+    """A class that does too much, holds too much, and hangs together poorly.
+
+    Metrics, all three of which must fire together (Lanza & Marinescu):
+      WMC -- weighted methods per class, the sum of every method's CYCLO;
+      TCC -- tight class cohesion, the fraction of method pairs that touch a
+             common instance variable, 1.0 being perfectly cohesive;
+      NIV -- number of instance variables.
+    Breaks when WMC >= min_wmc and TCC < max_tcc and NIV >= min_niv. Skipped
+    when TCC is undefined (fewer than two eligible methods) or for extensions.
+    """
+
     id = "god-class"
     name = "God Class"
     severity = "critical"
@@ -37,6 +48,13 @@ class GodClass(Rule):
 
 @register
 class LargeClass(Rule):
+    """Class has accumulated more methods than one abstraction warrants.
+
+    Metric: NOM (number of methods, both sides). A plain size count, kept
+    separate from god-class because bulk alone is not proof of a design fault.
+    Breaks when NOM > max_methods.
+    """
+
     id = "large-class"
     name = "Large Class"
     severity = "major"
@@ -56,6 +74,14 @@ class LargeClass(Rule):
 
 @register
 class DataClass(Rule):
+    """A record with getters, no behaviour of its own.
+
+    Metrics: ACC_RATIO (share of methods that are plain accessors), gated by
+    NOM and NIV so a two-method value object is not flagged.
+    Breaks when NOM >= min_methods and NIV >= min_ivars and
+    ACC_RATIO >= min_accessor_ratio. Extensions are skipped.
+    """
+
     id = "data-class"
     name = "Data Class"
     severity = "minor"
@@ -84,6 +110,16 @@ class DataClass(Rule):
 
 @register
 class RefusedBequest(Rule):
+    """A subclass inherits an interface it then refuses to honour.
+
+    No numeric threshold. Uses the hierarchy to fetch the superclass, then
+    matches each method flagged IS_ABSTRACT (body is a lone
+    ``self subclassResponsibility``) against the parent's instance-side
+    selectors; any overlap is the finding.
+    Silent when the superclass lies outside the analysed source, since the
+    parent's selectors are then unknown.
+    """
+
     id = "refused-bequest"
     name = "Refused Bequest"
     severity = "major"
@@ -126,6 +162,15 @@ class RefusedBequest(Rule):
 
 @register
 class DeepInheritance(Rule):
+    """Behaviour is spread over a long chain of ancestors.
+
+    Metric: DIT (depth of inheritance tree). Counted only within the analysed
+    source -- a chain that leaves the project stops there rather than guessing
+    at the depth of the Pharo kernel above it, so DIT under-reports on a
+    single-package run.
+    Breaks when DIT > max_depth.
+    """
+
     id = "deep-inheritance"
     name = "Deep Inheritance"
     severity = "minor"
@@ -145,6 +190,15 @@ class DeepInheritance(Rule):
 
 @register
 class HighCoupling(Rule):
+    """Class depends on too much of the rest of the system to change safely.
+
+    Metric: CBO (coupling between objects) -- distinct classes named in its
+    method bodies, intersected with the classes actually present in the run and
+    excluding itself. References to kernel classes such as OrderedCollection
+    therefore cost nothing.
+    Breaks when CBO > max_cbo.
+    """
+
     id = "high-coupling"
     name = "High Coupling"
     severity = "minor"
