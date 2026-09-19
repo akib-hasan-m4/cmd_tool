@@ -1,0 +1,1336 @@
+<title>stsmell Internals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  /* ------------------------------------------------------------------
+     Page geometry. Sized for a phone screen: a 9:16 page at 105mm wide
+     means the PDF fills a handset viewport with no pinch-zoom, and the
+     measure stays near 45 characters.
+     ------------------------------------------------------------------ */
+  @page {
+    size: 105mm 187mm;
+    margin: 9mm 7mm 11mm;
+  }
+
+  :root {
+    --bg:        #ffffff;
+    --surface:   #f6f8f8;
+    --surface-2: #eceff0;
+    --ink:       #14191a;
+    --ink-2:     #47524f;
+    --ink-3:     #737f7c;
+    --rule:      #d8e0dd;
+    --rule-2:    #c1ccc8;
+    --accent:    #0c6a68;
+    --accent-2:  #0a4f4e;
+    --accent-bg: #ddedeb;
+    --sev-critical: #9c1f1c;
+    --sev-major:    #a1521a;
+    --sev-minor:    #7a6414;
+    --sev-info:     #2b6382;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 9.4pt;
+    line-height: 1.52;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Screen preview: emulate the page width so the HTML reads like the PDF. */
+  main {
+    max-width: 91mm;
+    margin: 0 auto;
+    padding: 0 4mm 8mm;
+  }
+  @media print {
+    main { max-width: none; margin: 0; padding: 0; }
+  }
+
+  /* ---------------- headings ---------------- */
+  h1, h2, h3, h4 {
+    font-family: var(--display);
+    line-height: 1.2;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: 15pt;
+    font-weight: 700;
+    letter-spacing: -.012em;
+    margin: 0 0 1.5mm;
+    break-before: page;
+    break-after: avoid;
+  }
+  h2 .num {
+    display: block;
+    font-size: 7.6pt;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.4mm;
+  }
+  h2 + .lede {
+    color: var(--ink-2);
+    font-size: 9.8pt;
+    font-style: italic;
+    margin: 0 0 4mm;
+    padding-bottom: 3mm;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-size: 11pt;
+    font-weight: 600;
+    margin: 6mm 0 1.6mm;
+    break-after: avoid;
+  }
+  h4 {
+    font-size: 8.4pt;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    margin: 4.5mm 0 1.4mm;
+    break-after: avoid;
+  }
+  p { margin: 0 0 2.6mm; orphans: 2; widows: 2; }
+
+  /* ---------------- inline ---------------- */
+  code, kbd {
+    font-family: var(--mono);
+    font-size: .87em;
+    background: var(--surface-2);
+    border-radius: 2px;
+    padding: .5px 2.5px;
+    overflow-wrap: anywhere;
+  }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+  a { color: var(--accent-2); }
+
+  /* ---------------- code blocks ----------------
+     No horizontal scrolling exists in a PDF, so every block wraps and
+     continuation lines are indented to stay readable. */
+  pre {
+    font-family: var(--mono);
+    font-size: 7.3pt;
+    line-height: 1.5;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 2.5px solid var(--accent);
+    border-radius: 3px;
+    padding: 2.4mm 2.8mm;
+    margin: 0 0 3mm;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding-left: 4mm;
+    text-indent: -1.4mm;
+    break-inside: avoid;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); font-style: italic; }
+  pre .k { color: var(--accent-2); font-weight: 700; }
+  pre .s { color: #8a4b12; }
+
+  /* ---------------- lists ---------------- */
+  ul, ol { margin: 0 0 3mm; padding-left: 4.6mm; }
+  li { margin-bottom: 1.4mm; }
+  li::marker { color: var(--accent); }
+  ul.tight li, ol.tight li { margin-bottom: .7mm; }
+
+  dl { margin: 0 0 3mm; }
+  dt {
+    font-family: var(--mono);
+    font-size: 8pt;
+    font-weight: 700;
+    color: var(--accent-2);
+    margin-top: 2.4mm;
+    overflow-wrap: anywhere;
+  }
+  dd { margin: .4mm 0 0; color: var(--ink-2); }
+
+  /* ---------------- tables ----------------
+     Two or three narrow columns only; anything wider becomes a card list. */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7.9pt;
+    margin: 0 0 3.5mm;
+    break-inside: avoid;
+  }
+  th {
+    text-align: left;
+    font-family: var(--display);
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    border-bottom: 1.2px solid var(--rule-2);
+    padding: 0 1.6mm 1.1mm 0;
+  }
+  td {
+    vertical-align: top;
+    padding: 1.3mm 1.6mm 1.3mm 0;
+    border-bottom: .6px solid var(--rule);
+    overflow-wrap: anywhere;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  td.m, th.m { font-family: var(--mono); font-size: 7.2pt; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ---------------- callouts ---------------- */
+  .note, .warn, .key {
+    border-radius: 3px;
+    padding: 2.4mm 2.8mm;
+    margin: 0 0 3.2mm;
+    font-size: 8.6pt;
+    break-inside: avoid;
+  }
+  .note { background: var(--surface); border-left: 2.5px solid var(--rule-2); }
+  .key  { background: var(--accent-bg); border-left: 2.5px solid var(--accent); }
+  .warn { background: #fbf1e8; border-left: 2.5px solid var(--sev-major); }
+  .note p:last-child, .warn p:last-child, .key p:last-child { margin-bottom: 0; }
+  .note .lbl, .warn .lbl, .key .lbl {
+    display: block;
+    font-family: var(--display);
+    font-size: 6.8pt;
+    font-weight: 700;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    margin-bottom: 1.1mm;
+    color: var(--ink-2);
+  }
+  .key .lbl { color: var(--accent-2); }
+  .warn .lbl { color: var(--sev-major); }
+
+  /* ---------------- rule cards ---------------- */
+  .rule-card {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 2.4mm 2.8mm;
+    margin: 0 0 2.6mm;
+    break-inside: avoid;
+  }
+  .rule-card .rid {
+    font-family: var(--mono);
+    font-size: 8.4pt;
+    font-weight: 700;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .rule-card .what { margin: 1mm 0 1.4mm; font-size: 8.6pt; }
+  .rule-card .cond {
+    font-family: var(--mono);
+    font-size: 7.2pt;
+    background: var(--surface);
+    border-radius: 2px;
+    padding: 1.4mm 1.8mm;
+    color: var(--ink-2);
+    overflow-wrap: anywhere;
+  }
+  .sev {
+    display: inline-block;
+    font-family: var(--display);
+    font-size: 6.4pt;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: .4mm 1.4mm;
+    border-radius: 2px;
+    vertical-align: 1.5px;
+    margin-left: 1.2mm;
+    color: #fff;
+  }
+  .sev.critical { background: var(--sev-critical); }
+  .sev.major    { background: var(--sev-major); }
+  .sev.minor    { background: var(--sev-minor); }
+  .sev.info     { background: var(--sev-info); }
+
+  /* ---------------- flow diagram ---------------- */
+  /* The eight steps may split across pages; each step stays whole. */
+  .flow { margin: 0 0 4mm; }
+  .flow-step {
+    break-inside: avoid;
+    display: flex;
+    gap: 2.2mm;
+    align-items: flex-start;
+    padding: 1.8mm 2.2mm;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    margin-bottom: 1mm;
+  }
+  .flow-step .idx {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 7pt;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent);
+    border-radius: 2px;
+    padding: .5mm 1.4mm;
+    margin-top: .3mm;
+  }
+  .flow-step .body { flex: 1 1 auto; min-width: 0; }
+  .flow-step .fn {
+    font-family: var(--mono);
+    font-size: 7.6pt;
+    font-weight: 700;
+    color: var(--accent-2);
+    overflow-wrap: anywhere;
+  }
+  .flow-step .desc { font-size: 8.2pt; color: var(--ink-2); margin-top: .4mm; }
+  .flow-arrow {
+    text-align: center;
+    color: var(--rule-2);
+    font-size: 7pt;
+    line-height: 1;
+    margin: -.2mm 0 .8mm;
+  }
+
+  /* ---------------- cover ---------------- */
+  .cover {
+    height: 165mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    break-after: page;
+  }
+  .cover .eyebrow {
+    font-family: var(--display);
+    font-size: 7.4pt;
+    font-weight: 700;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 3mm;
+  }
+  .cover h1 {
+    font-size: 26pt;
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.02;
+    margin-bottom: 3.5mm;
+  }
+  .cover .sub {
+    font-size: 11pt;
+    font-style: italic;
+    color: var(--ink-2);
+    margin-bottom: 6mm;
+    padding-bottom: 5mm;
+    border-bottom: 1px solid var(--rule);
+  }
+  .cover .meta {
+    font-family: var(--mono);
+    font-size: 7.4pt;
+    color: var(--ink-3);
+    line-height: 1.9;
+  }
+  .cover .meta b { color: var(--ink-2); font-weight: 700; }
+
+  /* ---------------- contents ---------------- */
+  .toc { break-after: page; }
+  .toc h2 { break-before: avoid; font-size: 13pt; margin-bottom: 1.8mm; }
+  .toc ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+  .toc li {
+    counter-increment: toc;
+    display: flex;
+    gap: 2mm;
+    padding: .05mm 0;
+    break-inside: avoid;
+    border-bottom: .6px solid var(--rule);
+    font-size: 7.9pt;
+    line-height: 1.3;
+  }
+  .toc li::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 7.2pt;
+    font-weight: 700;
+    color: var(--accent);
+    flex: 0 0 auto;
+    padding-top: .5mm;
+  }
+  .toc .t { font-weight: 600; }
+  .toc .d { color: var(--ink-3); font-size: 7.4pt; font-style: italic; }
+
+  .first { break-before: avoid; }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 5mm 0;
+  }
+  .end {
+    text-align: center;
+    font-family: var(--display);
+    font-size: 7.2pt;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 6mm;
+  }
+</style>
+
+<main>
+
+<!-- ============================ COVER ============================ -->
+<section class="cover">
+  <div class="eyebrow">Field manual</div>
+  <h1>stsmell<br>Internals</h1>
+  <p class="sub">A function-level walk through a code smell detector for Pharo/Smalltalk — every stage, every metric, every edge case.</p>
+  <div class="meta">
+    <b>subject</b> &nbsp;stsmell 0.1.0<br>
+    <b>scope</b> &nbsp;&nbsp;&nbsp;2,416 lines across 23 modules<br>
+    <b>reads</b> &nbsp;&nbsp;&nbsp;Tonel source, no Pharo image<br>
+    <b>format</b> &nbsp;&nbsp;sized for a phone screen
+  </div>
+</section>
+
+<!-- ============================ TOC ============================ -->
+<section class="toc">
+  <h2 class="first"><span class="num">Contents</span>What is in here</h2>
+  <ol>
+    <li><div><div class="t">The shape of the thing</div><div class="d">Layering law and module map</div></div></li>
+    <li><div><div class="t">Entry and dispatch</div><div class="d">cli.py, four commands, exit codes</div></div></li>
+    <li><div><div class="t">Configuration</div><div class="d">Discovery, parsing, three-level merge</div></div></li>
+    <li><div><div class="t">Finding files</div><div class="d">discovery.py</div></div></li>
+    <li><div><div class="t">Parsing</div><div class="d">tree-sitter, caching, the offset trick</div></div></li>
+    <li><div><div class="t">Extraction</div><div class="d">CST to model, STON header, orphans</div></div></li>
+    <li><div><div class="t">The model</div><div class="d">Dataclasses and one lifetime hazard</div></div></li>
+    <li><div><div class="t">Selectors</div><div class="d">Why there is nothing to count</div></div></li>
+    <li><div><div class="t">Method metrics</div><div class="d">One walk, nineteen counters</div></div></li>
+    <li><div><div class="t">Class metrics</div><div class="d">Aggregation and cohesion</div></div></li>
+    <li><div><div class="t">The hierarchy</div><div class="d">Rebuilding inheritance from names</div></div></li>
+    <li><div><div class="t">The rule engine</div><div class="d">Registry, context, findings</div></div></li>
+    <li><div><div class="t">Rule catalogue</div><div class="d">All sixteen, with conditions</div></div></li>
+    <li><div><div class="t">Filter and report</div><div class="d">Baseline, floor, three renderers</div></div></li>
+    <li><div><div class="t">One finding, end to end</div><div class="d">A single trace through every stage</div></div></li>
+    <li><div><div class="t">Invariants and edges</div><div class="d">What holds, what silently does not</div></div></li>
+    <li><div><div class="t">Extending it</div><div class="d">Adding a rule in four steps</div></div></li>
+  </ol>
+</section>
+
+<!-- ============================ 1 ============================ -->
+<h2><span class="num">Section 01</span>The shape of the thing</h2>
+<p class="lede">A strict one-way pipeline, with a hard rule about who may touch the parse tree.</p>
+
+<p>Eight stages run in a fixed order. Data moves forward only; no stage reaches back to the one before it.</p>
+
+<div class="flow">
+  <div class="flow-step"><span class="idx">1</span><div class="body"><div class="fn">cli.main</div><div class="desc">Parse argv, dispatch to a command function.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">2</span><div class="body"><div class="fn">config.load_config</div><div class="desc">Find and read stsmell.toml, merge defaults.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">3</span><div class="body"><div class="fn">discovery.discover</div><div class="desc">Walk the tree for *.class.st and friends.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">4</span><div class="body"><div class="fn">parsing.parse_file</div><div class="desc">tree-sitter produces one CST per file.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">5</span><div class="body"><div class="fn">extract.extract_file</div><div class="desc">CST to ClassDef / MethodDef dataclasses.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">6</span><div class="body"><div class="fn">metrics.compute_metrics</div><div class="desc">Hierarchy, then per-method, then per-class.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">7</span><div class="body"><div class="fn">rules.run_rules</div><div class="desc">Every enabled rule against every entity.</div></div></div>
+  <div class="flow-arrow">▼</div>
+  <div class="flow-step"><span class="idx">8</span><div class="body"><div class="fn">report.render_*</div><div class="desc">Text, JSON or SARIF; exit 0, 1 or 2.</div></div></div>
+</div>
+
+<h3>The layering law</h3>
+
+<p>One constraint shapes the whole design, and it is stated in the docstring of <code>rules/base.py</code>:</p>
+
+<div class="key">
+  <span class="lbl">The rule</span>
+  <p>Rules read <em>computed metrics and the model only — never the CST.</em></p>
+</div>
+
+<p>Contact with tree-sitter is confined to two modules, <code>parsing.py</code> and <code>extract.py</code>, plus the metric walkers that consume <code>body_node</code>. Above that line everything is plain numbers, strings and dataclasses.</p>
+
+<p>Three things fall out of this:</p>
+
+<ul>
+  <li>A rule is testable from a hand-built <code>ClassMetrics</code> with no file, no parser and no grammar.</li>
+  <li>Swapping the grammar is a change to two files.</li>
+  <li>A rule cannot accidentally depend on syntax, which would make its threshold meaningless across formatting styles.</li>
+</ul>
+
+<h3>Module map</h3>
+
+<table>
+  <thead><tr><th>Module</th><th class="n">Lines</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td class="m">cli.py</td><td class="n">204</td><td>argparse, four commands</td></tr>
+    <tr><td class="m">analysis.py</td><td class="n">60</td><td>Pipeline orchestration</td></tr>
+    <tr><td class="m">config.py</td><td class="n">97</td><td>TOML, thresholds, severity order</td></tr>
+    <tr><td class="m">discovery.py</td><td class="n">44</td><td>File walk and excludes</td></tr>
+    <tr><td class="m">parsing.py</td><td class="n">112</td><td>tree-sitter, CST helpers</td></tr>
+    <tr><td class="m">extract.py</td><td class="n">206</td><td>CST → model</td></tr>
+    <tr><td class="m">model.py</td><td class="n">94</td><td>Dataclasses</td></tr>
+    <tr><td class="m">selectors.py</td><td class="n">95</td><td>Curated selector sets</td></tr>
+    <tr><td class="m">metrics/method.py</td><td class="n">324</td><td>Per-method counters</td></tr>
+    <tr><td class="m">metrics/klass.py</td><td class="n">95</td><td>Aggregation, TCC</td></tr>
+    <tr><td class="m">metrics/hierarchy.py</td><td class="n">80</td><td>Superclass graph</td></tr>
+    <tr><td class="m">metrics/suite.py</td><td class="n">44</td><td>Drives all metrics</td></tr>
+    <tr><td class="m">rules/base.py</td><td class="n">129</td><td>Rule, Finding, registry</td></tr>
+    <tr><td class="m">rules/method_rules.py</td><td class="n">258</td><td>9 method rules</td></tr>
+    <tr><td class="m">rules/class_rules.py</td><td class="n">216</td><td>5 class rules</td></tr>
+    <tr><td class="m">rules/smalltalk_rules.py</td><td class="n">129</td><td>3 idiom rules</td></tr>
+    <tr><td class="m">report/text.py</td><td class="n">92</td><td>Terminal, ANSI colour</td></tr>
+    <tr><td class="m">report/sarif.py</td><td class="n">79</td><td>SARIF 2.1.0</td></tr>
+    <tr><td class="m">report/json_report.py</td><td class="n">24</td><td>JSON</td></tr>
+  </tbody>
+</table>
+
+<h3>The orchestrator</h3>
+
+<p><code>analysis.analyze</code> is the whole pipeline in nine lines, and is the function to call when embedding the tool:</p>
+
+<pre><code><span class="k">def</span> analyze(root, config=None):
+    config = (config or Config()).with_defaults(registry())
+    project, parse_errors, read_errors = build_project(root, config)
+    suite = compute_metrics(project)
+    findings = run_rules(suite, config)
+    <span class="k">return</span> AnalysisResult(...)</code></pre>
+
+<p><code>build_project</code> wraps each file in a try/except for <code>OSError</code> and <code>UnicodeDecodeError</code>. A file that cannot be read is recorded in <code>read_errors</code> and skipped; the run continues.</p>
+
+<!-- ============================ 2 ============================ -->
+<h2><span class="num">Section 02</span>Entry and dispatch</h2>
+<p class="lede">Four subcommands over one analysis, distinguished by what they do with the result.</p>
+
+<p><code>build_parser</code> constructs an <code>argparse</code> tree with <code>required=True</code> on the subparsers, so bare <code>stsmell</code> is an error. A closure named <code>add_common</code> attaches the three shared arguments — <code>path</code>, <code>--config</code>, <code>--exclude</code> — to every subcommand that analyses source.</p>
+
+<p>Each subparser sets <code>func</code> via <code>set_defaults</code>, and <code>main</code> simply calls <code>args.func(args)</code>. Adding a command means adding a parser and a function; nothing dispatches on strings.</p>
+
+<h3>The four commands</h3>
+
+<dl>
+  <dt>analyze</dt>
+  <dd>Report smells. Applies the baseline, then the severity floor, then renders in text, JSON or SARIF. The only command that can exit non-zero on findings.</dd>
+  <dt>metrics</dt>
+  <dd>Dump raw numbers as CSV or JSON, at method or class scope. Runs the rules too — it shares <code>analyze()</code> — but ignores the findings. This is the recalibration tool.</dd>
+  <dt>rules</dt>
+  <dd>List every registered rule with its resolved thresholds. Takes no path: it loads config and the registry only.</dd>
+  <dt>baseline</dt>
+  <dd>Freeze the current findings to JSON so a later run reports only what is new.</dd>
+</dl>
+
+<h3>Exit codes</h3>
+
+<table>
+  <thead><tr><th class="n">Code</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td class="n m">0</td><td>Clean, or a non-analyze command succeeded</td></tr>
+    <tr><td class="n m">1</td><td>At least one finding survived filtering</td></tr>
+    <tr><td class="n m">2</td><td>ConfigError or FileNotFoundError</td></tr>
+  </tbody>
+</table>
+
+<p>Note the asymmetry: <strong>unreadable files do not change the exit code.</strong> They are printed to stderr and counted, but <code>cmd_analyze</code> returns <code>EXIT_FINDINGS</code> purely on whether the findings list is non-empty. A CI job that must fail on read errors has to check stderr itself.</p>
+
+<div class="note">
+  <span class="lbl">Deliberate</span>
+  <p><code>BrokenPipeError</code> is caught in <code>main</code> and returns 0, so <code>stsmell analyze src/ | head</code> does not produce a traceback.</p>
+</div>
+
+<h3>Order of filtering</h3>
+
+<p>In <code>cmd_analyze</code> the baseline is subtracted <em>before</em> the severity floor is applied. The two are independent, but the ordering means a baselined critical finding is gone by the time the floor is consulted — it can never resurface by lowering <code>min_severity</code>.</p>
+
+<!-- ============================ 3 ============================ -->
+<h2><span class="num">Section 03</span>Configuration</h2>
+<p class="lede">Three sources, merged in a fixed precedence, resolved lazily at the point of use.</p>
+
+<h3>Finding the file</h3>
+
+<p><code>find_config</code> starts at the analysed path — its parent if it is a file — and walks upward through every ancestor directory, checking for <code>stsmell.toml</code> then <code>.stsmell.toml</code> at each level. The first hit wins. An explicit <code>--config</code> bypasses the search entirely.</p>
+
+<p>This means a monorepo can hold one config at the root, and analysing any subdirectory picks it up.</p>
+
+<h3>Reading it</h3>
+
+<p><code>load_config</code> imports <code>tomllib</code> on 3.11+ and falls back to the third-party <code>tomli</code> on 3.10. If neither is present the error is raised at read time, not import time, so a run with no config file works on 3.10 without <code>tomli</code> installed.</p>
+
+<p>Validation is deliberately shallow. Three things are checked:</p>
+
+<ul class="tight">
+  <li><code>min_severity</code> must be one of the four known levels.</li>
+  <li><code>[rules]</code> must be a table.</li>
+  <li>Each <code>[rules.x]</code> must be a table.</li>
+</ul>
+
+<p>Threshold <em>names</em> are not validated. A typo such as <code>max_line = 30</code> is silently stored and never read; the rule keeps its default. This is a real trap, and the reason <code>stsmell rules</code> prints resolved thresholds.</p>
+
+<h3>Three-level resolution</h3>
+
+<p><code>with_defaults</code> runs once per analysis, before any rule executes. For each registered rule it builds a merged dict:</p>
+
+<pre><code>merged = dict(rule.defaults)      <span class="c"># 1. class defaults</span>
+merged.setdefault(<span class="s">"enabled"</span>, True)
+merged.update(self.rules.get(rule.id, {}))  <span class="c"># 2. TOML wins</span></code></pre>
+
+<p>At check time, <code>Rule.opt</code> reads through that merged view:</p>
+
+<pre><code><span class="k">def</span> opt(self, ctx, name):
+    <span class="k">return</span> ctx.config.threshold(
+        self.id, name, self.defaults.get(name))</code></pre>
+
+<p>The third fallback — <code>self.defaults.get(name)</code> — matters when a config file was loaded but never passed through <code>with_defaults</code>, as in a unit test. It is why every rule body must call <code>self.opt(ctx, ...)</code> rather than reading <code>self.defaults</code> directly.</p>
+
+<p>Command-line flags are layered on last, inside <code>cli._load</code>: <code>--exclude</code> extends the list, <code>--min-severity</code> overwrites.</p>
+
+<!-- ============================ 4 ============================ -->
+<h2><span class="num">Section 04</span>Finding files</h2>
+<p class="lede">Forty-four lines, three suffixes, one exclusion that matters.</p>
+
+<p>Tonel keeps one type per file, so file discovery <em>is</em> class discovery. <code>is_tonel_file</code> accepts three suffixes:</p>
+
+<pre><code>TONEL_SUFFIXES = (<span class="s">".class.st"</span>, <span class="s">".trait.st"</span>,
+                  <span class="s">".extension.st"</span>)</code></pre>
+
+<p>and rejects one name outright:</p>
+
+<pre><code><span class="k">if</span> name == <span class="s">"package.st"</span>:
+    <span class="k">return</span> False  <span class="c"># marker, no class or method</span></code></pre>
+
+<p><code>discover</code> handles a file path and a directory path through the same entry point: given a file it returns <code>[root]</code> or <code>[]</code>, given a directory it runs <code>rglob("*.st")</code> and filters. The result is sorted, which is what makes output stable across runs and filesystems.</p>
+
+<h3>Excludes</h3>
+
+<p>Four patterns are always applied — <code>.git</code>, <code>node_modules</code>, <code>.venv</code>, <code>pharo-local</code> — with user patterns appended. Matching is <code>fnmatch</code> against the <em>full resolved path string</em>, so a pattern needs leading and trailing wildcards to match a path segment: <code>*/Tests/*</code>, not <code>Tests</code>.</p>
+
+<div class="warn">
+  <span class="lbl">Format trap</span>
+  <p>A filetree repository — the older <code>.package/</code> layout used by Seaside and zinc — contains no <code>.class.st</code> files at all. <code>discover</code> returns an empty list, every later stage runs cleanly over nothing, and the tool reports zero findings and exits 0. Check for a <code>.properties</code> file holding <code>{ #format : #tonel }</code> before trusting a clean run.</p>
+</div>
+
+<!-- ============================ 5 ============================ -->
+<h2><span class="num">Section 05</span>Parsing</h2>
+<p class="lede">A real CST, built once per file, with one rewrite that preserves every byte offset.</p>
+
+<h3>Caching</h3>
+
+<p>Both grammar and parser are memoised with <code>functools.lru_cache(maxsize=1)</code>, so the shared library loads once per process and a single <code>Parser</code> instance serves every file. The comment on <code>get_language</code> records a specific gotcha: the package's <code>language()</code> already returns a built <code>tree_sitter.Language</code>, and wrapping it again raises <code>TypeError</code>.</p>
+
+<h3>The offset-preserving rewrite</h3>
+
+<p>Traits write class-side methods as <code>TFoo classSide &gt;&gt; bar</code>, but the grammar only knows the class form <code>Foo class &gt;&gt; bar</code>. Such files would fail to parse. <code>normalize_source</code> rewrites the keyword before parsing:</p>
+
+<pre><code>_CLASS_SIDE_RE = re.compile(
+  rb"(^|\n)([A-Za-z_]\w*)([ \t]+)classSide([ \t]*&gt;&gt;)")
+_REPLACEMENT = rb"\1\2\3class    \4"</code></pre>
+
+<p>The substitution is the point. <code>classSide</code> is nine characters; <code>class</code> plus four spaces is also nine. Every byte after the rewrite sits at exactly the offset it had in the original file, so <strong>every reported line and column is still true of the file on disk.</strong> A shorter replacement would silently shift columns on the rewritten line.</p>
+
+<h3>Errors are recorded, not raised</h3>
+
+<p>tree-sitter recovers from syntax errors rather than aborting, producing a partial tree with <code>ERROR</code> nodes in it. <code>has_error</code> reads <code>tree.root_node.has_error</code>, and <code>build_project</code> stores the result on <code>ParsedFile.parse_error</code> and appends the path to a list.</p>
+
+<p>The file stays in the project. Partial results from a partially parsed file are still useful, and the count surfaces in the report footer rather than failing the run.</p>
+
+<h3>Helper inventory</h3>
+
+<dl>
+  <dt>node_text(node, source)</dt>
+  <dd>Slice by byte offsets, decode UTF-8 with <code>errors="replace"</code>. Returns <code>""</code> for <code>None</code>.</dd>
+  <dt>strip_string_literal</dt>
+  <dd><code>'it''s'</code> → <code>it's</code>.</dd>
+  <dt>strip_symbol</dt>
+  <dd><code>#name</code> → <code>name</code>; handles the quoted form <code>#'odd name'</code>.</dd>
+  <dt>strip_class_comment</dt>
+  <dd>Unwraps double quotes, halves doubled <code>""</code>.</dd>
+  <dt>walk / walk_named</dt>
+  <dd>Iterative depth-first generators over a node and its descendants. Iterative, not recursive — no stack limit on a deep tree.</dd>
+  <dt>children_of_type / first_child_of_type</dt>
+  <dd>Direct-child lookup by node type.</dd>
+</dl>
+
+<!-- ============================ 6 ============================ -->
+<h2><span class="num">Section 06</span>Extraction</h2>
+<p class="lede">The bridge: tree-sitter nodes in, plain dataclasses out.</p>
+
+<h3>Reading the STON header</h3>
+
+<p>A Tonel definition header is STON, a Smalltalk-flavoured JSON. Three small functions read it:</p>
+
+<dl>
+  <dt>_ston_pairs(map_node)</dt>
+  <dd>Maps each key, with <code>#</code> stripped, to its unparsed <code>ston_value</code> node.</dd>
+  <dt>_ston_scalar(value_node)</dt>
+  <dd>Dispatches on the first character: <code>'</code> means string, <code>#</code> means symbol, anything else is returned raw (numbers).</dd>
+  <dt>_ston_list(value_node)</dt>
+  <dd>Reads a <code>ston_list</code> of scalars. If there is no list node it degrades to a single scalar wrapped in a list, tolerating <code>#instVars : 'x'</code>.</dd>
+</dl>
+
+<p><code>_build_class</code> then pulls the known keys. One line encodes a format migration:</p>
+
+<pre><code><span class="c"># Tonel 3.0 replaced #category with</span>
+<span class="c"># #package + #tag for class definitions.</span>
+package=scalar(<span class="s">"package"</span>) or scalar(<span class="s">"category"</span>),
+category=scalar(<span class="s">"category"</span>) or scalar(<span class="s">"tag"</span>),</code></pre>
+
+<p>Both spellings resolve to the same fields, so a repository written before or after the change measures identically.</p>
+
+<h3>Reconstructing selectors</h3>
+
+<p>A keyword method declares one <code>selector</code> field per keyword part. <code>_selector_of</code> concatenates them:</p>
+
+<pre><code>parts = [node_text(n, source).strip()
+         <span class="k">for</span> n <span class="k">in</span> ref.children_by_field_name(<span class="s">"selector"</span>)]
+<span class="k">return</span> <span class="s">""</span>.join(parts), params</code></pre>
+
+<p>So <code>deposit: amount into: account</code> yields the selector <code>deposit:into:</code> and the params <code>['amount', 'account']</code>. That concatenated form is the identity used everywhere downstream — in findings, in <code>refused-bequest</code> matching, in the CSV.</p>
+
+<h3>Method metadata</h3>
+
+<p><code>_build_method</code> reads the <code>{ #category : '...' }</code> pragma above the method, then scans the direct children of <code>method_body</code> for two node types: <code>temporaries</code> (contributing declared names) and <code>pragma</code> (contributing <code>&lt;primitive:&gt;</code>-style annotations).</p>
+
+<div class="note">
+  <span class="lbl">Consequence</span>
+  <p>Only <em>direct</em> children are scanned, so a temporary declared inside a block does not appear in <code>method.temporaries</code> and does not count toward TEMPS.</p>
+</div>
+
+<h3>The assembly loop</h3>
+
+<p><code>extract_file</code> iterates the top-level children of the root node and handles four cases:</p>
+
+<ol class="tight">
+  <li><code>class_comment</code> — held in <code>pending_comment</code> and attached to the next definition seen.</li>
+  <li><code>definition</code> — unwrapped to find the inner class, trait or extension node.</li>
+  <li>A bare definition node — tolerated in case the grammar does not wrap it.</li>
+  <li><code>method_definition</code> — built and filed against its owning class.</li>
+</ol>
+
+<h3>Orphan methods get a home</h3>
+
+<p><code>_target_class</code> matches a method to its class by name. Two fallbacks keep methods from being dropped:</p>
+
+<ul>
+  <li>If exactly one definition exists in the file, an unmatched method is filed there anyway — Tonel guarantees one type per file, so a renamed or mismatched reference still lands sensibly.</li>
+  <li>If there is no definition at all, a synthetic <code>ClassDef</code> of kind <code>extension</code> is created to hold the method, so it is still analysed.</li>
+</ul>
+
+<!-- ============================ 7 ============================ -->
+<h2><span class="num">Section 07</span>The model</h2>
+<p class="lede">Four dataclasses, and one reference that must not be dropped.</p>
+
+<dl>
+  <dt>MethodDef</dt>
+  <dd>class_name, selector, params, temporaries, pragmas, category, class_side, path, start_line, end_line, source, and <code>body_node</code>.</dd>
+  <dt>ClassDef</dt>
+  <dd>name, superclass, inst_vars, class_inst_vars, class_vars, traits, package, category, kind, comment, methods. Properties: <code>is_extension</code>, <code>instance_methods</code>, <code>class_methods</code>.</dd>
+  <dt>ParsedFile</dt>
+  <dd>path, source, tree, classes, parse_error.</dd>
+  <dt>Project</dt>
+  <dd>root and files, with <code>classes</code>, <code>methods</code> and <code>class_names()</code> flattening across files.</dd>
+</dl>
+
+<h3>The lifetime hazard</h3>
+
+<p><code>ParsedFile</code> carries the whole <code>tree</code>, and its docstring says why:</p>
+
+<div class="warn">
+  <span class="lbl">Do not optimise this away</span>
+  <p>Holds <code>tree</code> so that tree-sitter Nodes referenced by MethodDef stay alive; <strong>dropping the Tree invalidates every Node derived from it.</strong></p>
+</div>
+
+<p>Nodes are views into memory owned by the C-level tree. If the last Python reference to the <code>Tree</code> is released, every <code>body_node</code> in every <code>MethodDef</code> becomes a dangling handle. The metric pass runs long after extraction, so the tree has to survive until then — which also means peak memory is proportional to the whole corpus, not one file.</p>
+
+<h3>Two distinctions worth noting</h3>
+
+<p><code>klass.methods</code> holds <em>both</em> sides. <code>instance_methods</code> and <code>class_methods</code> partition it on <code>m.class_side</code>. So NOM counts both sides while NOCM counts only the class side — the two are not disjoint.</p>
+
+<p><code>is_extension</code> is a kind check, not a heuristic. It gates three class rules that would otherwise measure a fragment as though it were a class.</p>
+
+<!-- ============================ 8 ============================ -->
+<h2><span class="num">Section 08</span>Selectors</h2>
+<p class="lede">The Smalltalk-specific heart of the tool, and the reason a Java linter cannot be ported directly.</p>
+
+<p>Smalltalk has no control-flow syntax. No <code>if</code>, no <code>while</code>, no <code>for</code>. Every branch and loop is an ordinary message send taking block arguments:</p>
+
+<pre><code>x &gt; 0
+    ifTrue: [ self grow ]
+    ifFalse: [ self shrink ].</code></pre>
+
+<p>There is no keyword to count. Cyclomatic complexity has to be computed by recognising <em>selectors</em> on message-send nodes, which is what <code>selectors.py</code> curates. Four sets union into <code>BRANCHING</code>:</p>
+
+<table>
+  <thead><tr><th>Set</th><th class="n">Size</th><th>Examples</th></tr></thead>
+  <tbody>
+    <tr><td class="m">CONDITIONAL</td><td class="n">20</td><td class="m">ifTrue:, ifNil:, detect:ifNone:, at:ifAbsent:</td></tr>
+    <tr><td class="m">BOOLEAN</td><td class="n">2</td><td class="m">and:, or:</td></tr>
+    <tr><td class="m">LOOPING</td><td class="n">23</td><td class="m">do:, collect:, to:do:, inject:into:</td></tr>
+    <tr><td class="m">EXCEPTIONAL</td><td class="n">5</td><td class="m">on:do:, ensure:, ifCurtailed:</td></tr>
+  </tbody>
+</table>
+
+<p>Two smaller sets steer other metrics:</p>
+
+<dl>
+  <dt>ABSTRACT_MARKERS</dt>
+  <dd><code>subclassResponsibility</code>, <code>shouldBeImplemented</code>, <code>notYetImplemented</code>. A body consisting solely of one of these marks an abstract or refused method.</dd>
+  <dt>SELF_RECEIVERS</dt>
+  <dd><code>self</code>, <code>super</code>, <code>thisContext</code>. Receivers that are not foreign objects, so they are excluded from feature envy and Law of Demeter.</dd>
+</dl>
+
+<p>Node-type sets complete the picture: <code>MESSAGE_NODES</code> is the three ordinary send types, <code>CASCADED_MESSAGE_NODES</code> the three cascade forms whose receiver is implicit, and <code>ALL_MESSAGE_NODES</code> their union.</p>
+
+<div class="key">
+  <span class="lbl">Implication</span>
+  <p>Coverage is a curation problem, not a parsing problem. A project with its own iteration selector — say <code>eachPairDo:</code> — is under-counted for complexity until that selector is added to the set. The lists are the tool's calibration surface.</p>
+</div>
+
+<!-- ============================ 9 ============================ -->
+<h2><span class="num">Section 09</span>Method metrics</h2>
+<p class="lede">One pass over the body populates nineteen fields; two small passes clean up what the first cannot see.</p>
+
+<p><code>compute_method_metrics(method, klass, source)</code> returns a <code>MethodMetrics</code>. It begins with the two counts that need no tree — <code>params</code> and <code>temps</code>, both lengths of lists already on the model — and returns early if <code>body_node</code> is <code>None</code>.</p>
+
+<h3>Setting up</h3>
+
+<p>Two name sets are built before the walk, and the difference between them is deliberate:</p>
+
+<pre><code>ivars = inst_vars | class_inst_vars | class_vars
+envy_names = set(method.params)</code></pre>
+
+<p>The comment explains the asymmetry: feature envy is about reaching into <em>other</em> objects, and a temporary the method constructed itself — <code>parts := OrderedCollection new</code> — is not a foreign object. So temporaries are excluded from envy candidates while instance state and parameters are not.</p>
+
+<p>A third set solves a subtler problem:</p>
+
+<pre><code>declared_ids = {id(ident)
+  <span class="k">for</span> node <span class="k">in</span> walk(body) <span class="k">if</span> node.type == <span class="s">"temporaries"</span>
+  <span class="k">for</span> ident <span class="k">in</span> node.children
+  <span class="k">if</span> ident.type == <span class="s">"identifier"</span>}</code></pre>
+
+<p>Identifiers inside a <code>| a b |</code> declaration are declarations, not accesses, and would otherwise inflate NOAV. Note the key is <code>id(node)</code> — object identity, not name — so a variable that is both declared and used still counts its uses.</p>
+
+<h3>The main walk</h3>
+
+<p>A single <code>walk(body)</code> dispatches on node type.</p>
+
+<h4>Message nodes</h4>
+<p>Increment MSG. Reconstruct the selector; if it is in <code>BRANCHING</code>, increment CYCLO. Then, for non-cascaded sends only:</p>
+<ul class="tight">
+  <li>Compute chain length and update MAXCHAIN.</li>
+  <li>Find the chain base; if it is not a self-receiver, update FOREIGN_MAXCHAIN.</li>
+  <li>Look at the immediate receiver: a self-receiver increments SELF_SENDS; a plain identifier that names an ivar or a parameter increments that name's entry in the <code>foreign_sends</code> Counter.</li>
+</ul>
+
+<div class="note">
+  <span class="lbl">Two exclusions in one condition</span>
+  <p>The receiver branch reads <code>elif receiver.type == "identifier" and kind != "binary_message"</code>. Binary sends are arithmetic and comparison — <code>amount &gt; 0</code> — not delegation, so they never indicate envy. And only lowercase identifiers reach the counter, because a send to a capitalised global is construction, not envy.</p>
+</div>
+
+<h4>Cascade nodes</h4>
+<p>MAX_CASCADE takes the maximum of <code>1 + </code>the count of cascaded children — the one plus counts the head message before the first semicolon.</p>
+
+<h4>thisContext nodes</h4>
+<p>Set the boolean. No threshold; presence is the finding.</p>
+
+<h4>Identifier nodes</h4>
+<p>Skipped if in <code>declared_ids</code>. Otherwise the first character decides: uppercase goes to <code>referenced_classes</code>, which later becomes CBO; lowercase goes to the accessed set, which becomes NOAV, and additionally to <code>accessed_ivars</code> if it names instance state — the input to class cohesion.</p>
+
+<h3>The tree walkers</h3>
+
+<dl>
+  <dt>_unwrap(node)</dt>
+  <dd>Descends through <code>expression</code>, <code>primary</code> and <code>statement</code> wrapper nodes while each has exactly one named child. Without it every structural test would have to know the grammar's wrapper layers.</dd>
+  <dt>message_selector(node)</dt>
+  <dd>Three cases. Unary and binary read a single selector child; keyword concatenates every <code>keyword</code> child, reproducing <code>at:put:</code>.</dd>
+  <dt>_chain_length(node)</dt>
+  <dd>Starts at 1 and follows the <code>receiver</code> field while it is itself a message node.</dd>
+  <dt>_chain_base(node)</dt>
+  <dd>Same walk, but returns the final non-message receiver — the root object the chain started from.</dd>
+  <dt>_block_depth(body)</dt>
+  <dd>Recursive descent tracking depth, incrementing on each <code>block</code> node, returning the maximum.</dd>
+  <dt>_code_lines(body, source)</dt>
+  <dd>Collects line numbers from <em>leaf</em> nodes only, skipping comments, into a set. Counting distinct lines rather than nodes means MLOC is a physical line count that ignores blanks and comment-only lines.</dd>
+</dl>
+
+<h3>Shape detectors</h3>
+
+<p><code>_detect_accessor</code> recognises the two canonical shapes and nothing else. It requires exactly one statement and no temporaries, then matches either:</p>
+
+<ul class="tight">
+  <li><code>^ ivar</code> — a return, no params, of an identifier naming an instance variable; or</li>
+  <li><code>ivar := arg</code> — an assignment, exactly one param, whose target is an ivar and whose value is that same parameter by name.</li>
+</ul>
+
+<p>The value check is strict: <code>ivar := arg asString</code> is not an accessor, because the assigned value is a message send rather than the bare parameter.</p>
+
+<p><code>_detect_abstract</code> requires one statement which, after optionally unwrapping a return, is a unary message whose receiver is <code>self</code> and whose selector is in <code>ABSTRACT_MARKERS</code>. Both <code>self subclassResponsibility</code> and <code>^ self subclassResponsibility</code> match.</p>
+
+<h3>The second pass</h3>
+
+<p>After the main walk, a separate loop looks for a send to <code>super</code> with the same selector as the enclosing method, setting <code>calls_super_same_selector</code>. It breaks on the first hit. This is a distinct pass because it needs the method's own selector compared against each send — a relation the type-dispatching main loop is not shaped to express.</p>
+
+<h3>The nineteen fields</h3>
+
+<table>
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td class="m">mloc</td><td>Code lines</td></tr>
+    <tr><td class="m">cyclo</td><td>Complexity, starts at 1</td></tr>
+    <tr><td class="m">msg</td><td>Total sends</td></tr>
+    <tr><td class="m">params</td><td>Selector arity</td></tr>
+    <tr><td class="m">temps</td><td>Method-level temporaries</td></tr>
+    <tr><td class="m">nblk</td><td>Max block depth</td></tr>
+    <tr><td class="m">maxchain</td><td>Longest chain, any root</td></tr>
+    <tr><td class="m">foreign_maxchain</td><td>Longest non-self chain</td></tr>
+    <tr><td class="m">noav</td><td>Distinct names accessed</td></tr>
+    <tr><td class="m">max_cascade</td><td>Longest cascade</td></tr>
+    <tr><td class="m">self_sends</td><td>Sends to self/super</td></tr>
+    <tr><td class="m">foreign_sends</td><td>Counter by receiver name</td></tr>
+    <tr><td class="m">accessed_ivars</td><td>Set, feeds TCC</td></tr>
+    <tr><td class="m">referenced_classes</td><td>Set, feeds CBO</td></tr>
+    <tr><td class="m">uses_this_context</td><td>Boolean</td></tr>
+    <tr><td class="m">is_accessor</td><td>Boolean</td></tr>
+    <tr><td class="m">is_abstract</td><td>Boolean</td></tr>
+    <tr><td class="m">calls_super_&#8203;same_selector</td><td>Boolean</td></tr>
+  </tbody>
+</table>
+
+<p>The derived property <code>top_foreign</code> returns the most-messaged receiver and its count, or <code>(None, 0)</code>.</p>
+
+<!-- ============================ 10 ============================ -->
+<h2><span class="num">Section 10</span>Class metrics</h2>
+<p class="lede">Mostly aggregation. One measure does real work.</p>
+
+<p><code>compute_class_metrics</code> takes the class, its method metrics, the hierarchy and the set of project class names. Seven fields are direct aggregation:</p>
+
+<pre><code>nom  = len(klass.methods)
+nocm = len(klass.class_methods)
+niv  = len(klass.inst_vars)
+wmc  = sum(m.cyclo <span class="k">for</span> m <span class="k">in</span> method_metrics)
+cloc = sum(m.mloc <span class="k">for</span> m <span class="k">in</span> method_metrics)
+dit  = hierarchy.depth.get(klass.name, 0)
+noc  = hierarchy.num_children(klass.name)</code></pre>
+
+<p>WMC is worth restating: it is the <em>sum of complexities</em>, not a method count. Forty trivial accessors give WMC ≈ 40; ten branch-heavy methods can exceed it.</p>
+
+<h3>Coupling</h3>
+
+<pre><code>referenced = union of m.referenced_classes
+coupled = (referenced &amp; project_classes) - {klass.name}
+cbo = len(coupled)</code></pre>
+
+<p>The intersection is the whole design decision. Every capitalised identifier was collected during the method walk, including <code>OrderedCollection</code> and <code>Transcript</code>; intersecting with classes actually present in the run discards kernel references. Coupling is therefore measured relative to <em>the analysed source</em>, and narrowing the scanned path lowers CBO for the same code.</p>
+
+<h3>Tight class cohesion</h3>
+
+<p>TCC asks: of all pairs of methods, what fraction touch a common instance variable?</p>
+
+<pre><code>eligible = [m <span class="k">for</span> m <span class="k">in</span> metrics
+  <span class="k">if</span> <span class="k">not</span> m.is_accessor
+  <span class="k">and</span> <span class="k">not</span> m.is_abstract
+  <span class="k">and</span> <span class="k">not</span> m.method.class_side]
+<span class="k">if</span> len(eligible) &lt; 2: <span class="k">return</span> None
+pairs = combinations(eligible, 2)
+connected = sum(1 <span class="k">for</span> a, b <span class="k">in</span> pairs
+  <span class="k">if</span> a.accessed_ivars &amp; b.accessed_ivars)
+<span class="k">return</span> connected / len(pairs)</code></pre>
+
+<p>1.0 is perfect cohesion; near zero means the methods are strangers sharing a file. Three exclusions and one refusal:</p>
+
+<ul>
+  <li><strong>Accessors</strong> touch exactly one ivar and would connect to everything that uses it.</li>
+  <li><strong>Abstract methods</strong> touch none and would connect to nothing.</li>
+  <li><strong>Class-side methods</strong> do not access instance state at all.</li>
+  <li>Under two eligible methods, TCC is <code>None</code> — <em>undefined, not zero.</em> Every consumer must guard, and <code>god-class</code> does.</li>
+</ul>
+
+<p>Cost is quadratic in eligible methods. For a 200-method class that is 19,900 set intersections — acceptable, but it is the hot spot.</p>
+
+<p>Finally, <code>acc_ratio</code> is the share of methods flagged <code>is_accessor</code>, guarded against division by zero.</p>
+
+<!-- ============================ 11 ============================ -->
+<h2><span class="num">Section 11</span>The hierarchy</h2>
+<p class="lede">Tonel records no inheritance graph. It is rebuilt at runtime by matching strings.</p>
+
+<p>Each file names its superclass as a string in its own header. Nothing indexes them, so <code>Hierarchy.build</code> reconstructs the graph in three passes over <code>project.classes</code>:</p>
+
+<ol>
+  <li>Index every non-extension class by name into <code>by_name</code>, using <code>setdefault</code> so the first definition wins on a name collision.</li>
+  <li>For each class, append its name to <code>children[superclass]</code>; if the superclass is absent from <code>by_name</code>, record it in <code>unresolved</code>.</li>
+  <li>Compute <code>depth[name]</code> for every class.</li>
+</ol>
+
+<h3>What a depth of 1 means</h3>
+
+<p><code>_compute_depth</code> counts links walked <em>until the chain leaves the project</em>:</p>
+
+<pre><code>depth = 0
+seen = {name}
+<span class="k">while</span> current <span class="k">is</span> <span class="k">not</span> None:
+    klass = by_name.get(current)
+    <span class="k">if</span> klass <span class="k">is</span> None <span class="k">or</span> <span class="k">not</span> klass.superclass:
+        <span class="k">break</span>
+    depth += 1
+    parent = klass.superclass
+    <span class="k">if</span> parent <span class="k">in</span> seen: <span class="k">break</span>  <span class="c"># cyclic</span>
+    seen.add(parent)
+    current = parent</code></pre>
+
+<p>A class whose superclass is <code>Object</code> has depth 1, because <code>Object</code> lives in the kernel and is not in <code>by_name</code>. The docstring is explicit that chains leaving the project stop rather than guessing at the depth of the external hierarchy.</p>
+
+<p>So DIT under-reports, systematically, by however deep the real kernel ancestry runs. Analysing one package of a large project gives smaller numbers than the image would report. The <code>max_depth</code> default of 8 is calibrated against that convention, not against absolute image depth.</p>
+
+<p>The <code>seen</code> set is a defensive guard against a malformed cyclic hierarchy — a real possibility when the graph is assembled from unvalidated strings rather than a checked structure.</p>
+
+<!-- ============================ 12 ============================ -->
+<h2><span class="num">Section 12</span>The rule engine</h2>
+<p class="lede">A registry of stateless singletons, three optional hooks, one triple loop.</p>
+
+<h3>Registration</h3>
+
+<pre><code><span class="k">def</span> register(rule_cls):
+    _REGISTRY.append(rule_cls())
+    <span class="k">return</span> rule_cls</code></pre>
+
+<p>The decorator <strong>instantiates at import time</strong> and stores the instance. One object per rule serves the whole run, so rules must be stateless — nothing may accumulate on <code>self</code> between calls. Anything cross-class goes through <code>check_project</code> and the context instead.</p>
+
+<p>Import order determines registry order, which determines the order of same-severity findings after sorting. <code>rules/__init__.py</code> imports the three rule modules for their side effect.</p>
+
+<h3>The three hooks</h3>
+
+<p><code>Rule</code> declares all three returning <code>()</code>, so a subclass overrides only the level it needs:</p>
+
+<dl>
+  <dt>check_method(mm, cm, ctx)</dt>
+  <dd>Per method. Receives the class metrics too, so a method rule can consult its owner.</dd>
+  <dt>check_class(cm, ctx)</dt>
+  <dd>Per class.</dd>
+  <dt>check_project(ctx)</dt>
+  <dd>Once per run. Only <code>extension-sprawl</code> uses it.</dd>
+</dl>
+
+<p>All three are declared <code>Iterable[Finding]</code>, which is why bodies use <code>yield</code>: a rule that finds nothing yields nothing, and no empty-list bookkeeping is needed.</p>
+
+<h3>The three arguments</h3>
+
+<dl>
+  <dt>self</dt>
+  <dd>The shared singleton. Carries <code>id</code>, <code>severity</code>, <code>defaults</code>, plus <code>opt()</code> and the two finding builders.</dd>
+  <dt>cm / mm</dt>
+  <dd>The subject. Computed numbers, the underlying model object, and for a class the list of its method metrics.</dd>
+  <dt>ctx</dt>
+  <dd>Two fields. <code>ctx.config</code> for thresholds, reached through <code>self.opt</code>. <code>ctx.suite</code> for the whole-project view — the hierarchy and every class — which is how <code>refused-bequest</code> reaches a parent class living in another file.</dd>
+</dl>
+
+<h3>The driver</h3>
+
+<pre><code>ctx = RuleContext(suite=suite, config=config)
+active = [r <span class="k">for</span> r <span class="k">in</span> registry()
+          <span class="k">if</span> config.enabled(r.id)]
+
+<span class="k">for</span> rule <span class="k">in</span> active:
+    findings += rule.check_project(ctx)
+
+<span class="k">for</span> cm <span class="k">in</span> suite.classes:
+    <span class="k">for</span> rule <span class="k">in</span> active:
+        findings += rule.check_class(cm, ctx)
+    <span class="k">for</span> mm <span class="k">in</span> cm.method_metrics:
+        <span class="k">for</span> rule <span class="k">in</span> active:
+            findings += rule.check_method(mm, cm, ctx)</code></pre>
+
+<p>Disabled rules are filtered once, up front, so they are never called. Project rules run first, before any per-entity work.</p>
+
+<h3>Findings</h3>
+
+<p>A <code>Finding</code> carries rule id, severity, message, entity, file, line and a free-form metrics dict. Two helpers build one, filling identity and location from the subject; keyword arguments become the metrics dict that reaches JSON and SARIF.</p>
+
+<p>Two derived pieces matter:</p>
+
+<dl>
+  <dt>severity_rank</dt>
+  <dd>Numeric, via <code>SEVERITY_ORDER</code>, for the floor comparison and the sort.</dd>
+  <dt>key()</dt>
+  <dd><code>(rule, entity)</code> — deliberately <strong>line-number independent</strong>, so a baseline survives edits that move code around.</dd>
+</dl>
+
+<p>The final sort is <code>(-severity_rank, file, line, rule)</code>: worst first, then grouped by file in line order.</p>
+
+<!-- ============================ 13 ============================ -->
+<h2><span class="num">Section 13</span>Rule catalogue</h2>
+<p class="lede">Sixteen rules. Each card gives the smell and the exact firing condition.</p>
+
+<h3>Method rules — 9</h3>
+
+<div class="rule-card">
+  <div class="rid">long-method<span class="sev major">major</span></div>
+  <div class="what">Body too long to read in one sitting.</div>
+  <div class="cond">MLOC &gt; max_lines &nbsp;·&nbsp; default 25</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">complex-method<span class="sev major">major</span></div>
+  <div class="what">Too many independent paths. Counted from branching selectors, not keywords.</div>
+  <div class="cond">CYCLO &gt; max_cyclo &nbsp;·&nbsp; default 8</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">long-parameter-list<span class="sev minor">minor</span></div>
+  <div class="what">Keyword message takes more arguments than a caller can track.</div>
+  <div class="cond">PARAMS &gt; max_params &nbsp;·&nbsp; default 4</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">too-many-temporaries<span class="sev minor">minor</span></div>
+  <div class="what">Enough local state to suggest several jobs in one method.</div>
+  <div class="cond">TEMPS &gt; max_temps &nbsp;·&nbsp; default 6<br>block-local temps not counted</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">deeply-nested-blocks<span class="sev major">major</span></div>
+  <div class="what">Control flow buried several levels deep; each block is a conditional or loop body.</div>
+  <div class="cond">NBLK &gt; max_depth &nbsp;·&nbsp; default 3</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">message-chain<span class="sev minor">minor</span></div>
+  <div class="what">Law of Demeter. Navigates a long path through other objects.</div>
+  <div class="cond">FOREIGN_MAXCHAIN &gt; max_chain &nbsp;·&nbsp; default 4<br>chains rooted at self/super excluded</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">feature-envy<span class="sev major">major</span></div>
+  <div class="what">More interested in another object than its own.</div>
+  <div class="cond">top foreign ≥ min_foreign_sends (5)<br>AND top foreign &gt; SELF_SENDS<br>accessors exempt</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">uses-this-context<span class="sev minor">minor</span></div>
+  <div class="what">Reflective stack access. Legitimate in debuggers and exception machinery, a smell elsewhere.</div>
+  <div class="cond">boolean — no threshold</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">cascade-abuse<span class="sev info">info</span></div>
+  <div class="what">One cascade configures an object at unreadable length.</div>
+  <div class="cond">MAX_CASCADE &gt; max_cascade (6)<br>disabled in the shipped config</div>
+</div>
+
+<h3>Class rules — 5</h3>
+
+<div class="rule-card">
+  <div class="rid">god-class<span class="sev critical">critical</span></div>
+  <div class="what">Does too much, holds too much, hangs together poorly. Composite strategy after Lanza &amp; Marinescu.</div>
+  <div class="cond">WMC ≥ 47 AND TCC &lt; 0.33 AND NIV ≥ 5<br>skipped when TCC is None or extension</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">large-class<span class="sev major">major</span></div>
+  <div class="what">More methods than one abstraction warrants. Kept separate from god-class: bulk alone is not a fault.</div>
+  <div class="cond">NOM &gt; max_methods &nbsp;·&nbsp; default 40</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">data-class<span class="sev minor">minor</span></div>
+  <div class="what">A record with getters; the behaviour that should use this data lives elsewhere.</div>
+  <div class="cond">NOM ≥ 5 AND NIV ≥ 2<br>AND ACC_RATIO ≥ 0.8</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">refused-bequest<span class="sev major">major</span></div>
+  <div class="what">A subclass rejects the interface it inherits.</div>
+  <div class="cond">IS_ABSTRACT method whose selector is in the parent's instance-side selectors<br>silent if superclass outside source</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">deep-inheritance<span class="sev minor">minor</span></div>
+  <div class="what">Behaviour spread over a long ancestor chain.</div>
+  <div class="cond">DIT &gt; max_depth (8), within source only</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">high-coupling<span class="sev minor">minor</span></div>
+  <div class="what">Depends on too much of the system to change safely.</div>
+  <div class="cond">CBO &gt; max_cbo (15), project classes only</div>
+</div>
+
+<h3>Smalltalk rules — 3</h3>
+
+<div class="rule-card">
+  <div class="rid">missing-class-comment<span class="sev minor">minor</span></div>
+  <div class="what">Pharo treats the class comment as primary documentation, and the community enforces it.</div>
+  <div class="cond">comment absent or blank<br>classes and traits only</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">god-class-side<span class="sev minor">minor</span></div>
+  <div class="what">The metaclass has become a utility bag of static-style helpers.</div>
+  <div class="cond">NOCM &gt; max_class_methods (15)</div>
+</div>
+
+<div class="rule-card">
+  <div class="rid">extension-sprawl<span class="sev major">major</span></div>
+  <div class="what">A package monkey-patches foreign classes at a scale that hides behaviour. The one project-scoped rule.</div>
+  <div class="cond">extended classes &gt; 10<br>OR extension methods &gt; 30<br>per package</div>
+</div>
+
+<h3>The omission worth knowing</h3>
+
+<p><code>refused-bequest</code> implements half the classic heuristic on purpose. The Java version also flags subclasses that never touch inherited instance variables. The code says why that half is absent:</p>
+
+<div class="warn">
+  <span class="lbl">Measured, not assumed</span>
+  <p>Idiomatic Smalltalk reaches inherited state through accessors — <code>self origin</code> — rather than direct variable reference. On the Pharo corpus the ivar heuristic produced <strong>3,707 findings against 16 real ones.</strong></p>
+</div>
+
+<p>So the rule fires only on the unambiguous signal: overriding an inherited method with <code>subclassResponsibility</code>.</p>
+
+<!-- ============================ 14 ============================ -->
+<h2><span class="num">Section 14</span>Filter and report</h2>
+<p class="lede">Two subtractions, then one of three renderers.</p>
+
+<h3>Baseline subtraction</h3>
+
+<p><code>_load_baseline</code> reads the JSON and builds a set of <code>(rule, entity)</code> tuples. Findings whose <code>key()</code> is in that set are dropped.</p>
+
+<p>Because the key omits the line number, moving a method within its file does not resurrect a baselined finding. The trade-off is granularity: two findings of the same rule on the same entity collapse to one key, so if a method trips <code>long-method</code> twice — impossible today, but possible for a future rule that yields more than once — the baseline suppresses both.</p>
+
+<h3>Severity floor</h3>
+
+<p><code>SEVERITY_ORDER</code> maps info 0, minor 1, major 2, critical 3. Findings below <code>min_severity</code> are dropped. Applied after the baseline.</p>
+
+<h3>Three renderers</h3>
+
+<dl>
+  <dt>render_text</dt>
+  <dd>Groups by file, prints line, padded severity, message, rule id, then the entity on a second line. Colour is enabled only when the stream is a TTY and <code>NO_COLOR</code> is unset. The footer counts findings by severity plus files, classes and methods, and appends warnings for parse and read errors.</dd>
+  <dt>render_json</dt>
+  <dd>Root path, a summary block of six counts, the parse-error paths, and every finding as a dict.</dd>
+  <dt>render_sarif</dt>
+  <dd>SARIF 2.1.0 for GitHub code scanning.</dd>
+</dl>
+
+<h3>Two details in the SARIF writer</h3>
+
+<p>SARIF has three levels where the tool has four severities, so they are folded: critical and major both become <code>error</code>, minor becomes <code>warning</code>, info becomes <code>note</code>. Critical and major are indistinguishable once uploaded.</p>
+
+<p>The rules array is filtered to <code>if rule.id in used</code> — only rules that actually fired are declared, keeping the payload small.</p>
+
+<p>And an em dash separates entity from message rather than a colon, with a comment explaining why: keyword selectors already end in <code>:</code>, so a colon separator would render as <code>classify:: ...</code>.</p>
+
+<p>Paths are made relative to the project root, falling back to the absolute path when <code>relative_to</code> raises. Lines are clamped with <code>max(f.line, 1)</code>, since SARIF regions are 1-based and a synthesised holder class can carry line 0.</p>
+
+<!-- ============================ 15 ============================ -->
+<h2><span class="num">Section 15</span>One finding, end to end</h2>
+<p class="lede">A single trip through all eight stages, using a fixture in the repository.</p>
+
+<p>The source, <code>tests/fixtures/smelly/&#8203;FeatureEnvyExample.class.st</code>:</p>
+
+<pre><code>{ #category : 'printing' }
+FeatureEnvyExample &gt;&gt; describeCustomer [
+	| parts |
+	parts := OrderedCollection new.
+	parts add: customer firstName.
+	parts add: customer lastName.
+	parts add: customer emailAddress.
+	parts add: customer phoneNumber.
+	parts add: customer postalAddress.
+	parts add: customer accountNumber.
+	^ parts
+]</code></pre>
+
+<ol>
+  <li><strong>Discover.</strong> Suffix <code>.class.st</code> matches; the path is sorted into the list.</li>
+  <li><strong>Parse.</strong> No <code>classSide</code>, so <code>normalize_source</code> changes nothing. tree-sitter returns a clean tree.</li>
+  <li><strong>Extract.</strong> The STON header yields name, superclass <code>Object</code>, one instance variable <code>customer</code>. The method is built with selector <code>describeCustomer</code>, no params, temporaries <code>['parts']</code>, and <code>body_node</code> retained.</li>
+  <li><strong>Set up.</strong> <code>ivars = {'customer'}</code>. <code>envy_names = set()</code> — no params. <code>declared_ids</code> holds the <code>parts</code> identifier inside the temporaries node.</li>
+  <li><strong>Walk.</strong> Six <code>add:</code> keyword sends and six unary sends to <code>customer</code>. Each unary send has receiver type <code>identifier</code>, name <code>customer</code>, which is in <code>ivars</code> — so <code>foreign_sends['customer']</code> reaches 6. No receiver is a self-receiver, so <code>self_sends</code> stays 0. <code>OrderedCollection</code> is capitalised and lands in <code>referenced_classes</code>.</li>
+  <li><strong>Detect.</strong> Two statements plus a return, and a temporary is declared, so <code>is_accessor</code> is False.</li>
+  <li><strong>Judge.</strong> <code>FeatureEnvy.check_method</code> reads <code>top_foreign = ('customer', 6)</code>. Not an accessor; 6 ≥ 5; 6 &gt; 0. It yields.</li>
+  <li><strong>Report.</strong> Severity major, rank 2, sorted above the minors, printed under its file with the entity beneath.</li>
+</ol>
+
+<pre><code>smelly/FeatureEnvyExample.class.st
+     9    major  sends 6 messages to 'customer'
+              but only 0 to self  [feature-envy]
+         FeatureEnvyExample&gt;&gt;describeCustomer</code></pre>
+
+<p>Exit code 1.</p>
+
+<!-- ============================ 16 ============================ -->
+<h2><span class="num">Section 16</span>Invariants and edges</h2>
+<p class="lede">What the code guarantees, and where it quietly gives up.</p>
+
+<h3>Invariants</h3>
+
+<ul>
+  <li><strong>Byte offsets are never shifted.</strong> The only source rewrite is length-preserving, so every line and column is true of the file on disk.</li>
+  <li><strong>Discovery output is sorted</strong>, so findings are stable across runs and filesystems.</li>
+  <li><strong>The tree outlives extraction.</strong> <code>ParsedFile.tree</code> keeps every <code>body_node</code> valid.</li>
+  <li><strong>Rules never see the CST</strong> and are stateless singletons.</li>
+  <li><strong>Baseline keys ignore line numbers</strong>, so they survive code movement.</li>
+</ul>
+
+<h3>Silent degradations</h3>
+
+<table>
+  <thead><tr><th>Situation</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td>Filetree repo, not Tonel</td><td>Zero files, zero findings, exit 0</td></tr>
+    <tr><td>Superclass outside source</td><td>DIT stops; refused-bequest silent</td></tr>
+    <tr><td>Under 2 eligible methods</td><td>TCC None; god-class skipped</td></tr>
+    <tr><td>Misspelled threshold key</td><td>Stored, never read, default used</td></tr>
+    <tr><td>Unreadable file</td><td>stderr note; exit code unchanged</td></tr>
+    <tr><td>Parse error</td><td>Partial tree kept; counted in footer</td></tr>
+    <tr><td>Unknown iteration selector</td><td>CYCLO under-counts</td></tr>
+    <tr><td>Narrower scan path</td><td>CBO and DIT both fall</td></tr>
+  </tbody>
+</table>
+
+<h3>Cost</h3>
+
+<p>Everything is linear in source size except TCC, which is quadratic in a class's eligible method count. Memory is proportional to the whole corpus, because every parse tree is retained until the run ends.</p>
+
+<!-- ============================ 17 ============================ -->
+<h2><span class="num">Section 17</span>Extending it</h2>
+<p class="lede">Adding a rule touches one file, if the metric already exists.</p>
+
+<ol>
+  <li>Pick the level: method, class or project.</li>
+  <li>If the number you need is not already on <code>MethodMetrics</code> or <code>ClassMetrics</code>, add a field and populate it in the existing walk — do not start a second traversal.</li>
+  <li>Subclass <code>Rule</code> in the matching module, decorate with <code>@register</code>, set <code>id</code>, <code>name</code>, <code>severity</code>, <code>description</code>, <code>defaults</code>.</li>
+  <li>Implement one hook. Read thresholds with <code>self.opt(ctx, ...)</code>, never <code>self.defaults</code>. Yield through <code>self.method_finding</code> or <code>self.class_finding</code>.</li>
+</ol>
+
+<pre><code>@register
+<span class="k">class</span> ShoutingSelector(Rule):
+    <span class="s">"""Selector is written in caps."""</span>
+    id = <span class="s">"shouting-selector"</span>
+    name = <span class="s">"Shouting Selector"</span>
+    severity = <span class="s">"info"</span>
+    description = <span class="s">"Selector is all uppercase."</span>
+    defaults = {}
+
+    <span class="k">def</span> check_method(self, mm, cm, ctx):
+        sel = mm.method.selector
+        <span class="k">if</span> sel <span class="k">and</span> sel.isupper():
+            <span class="k">yield</span> self.method_finding(
+                mm, f<span class="s">"selector {sel} is shouting"</span>)</code></pre>
+
+<p>The rule appears in <code>stsmell rules</code> immediately, is configurable under <code>[rules.shouting-selector]</code> with no extra wiring, and can be switched off with <code>enabled = false</code>.</p>
+
+<div class="note">
+  <span class="lbl">Before you commit</span>
+  <p>The suite asserts every registered rule has a non-empty <code>description</code>. It is user-visible: it reaches <code>stsmell rules</code> and the SARIF <code>fullDescription</code>. Implementation notes belong in the class docstring instead.</p>
+</div>
+
+<p class="end">— end —</p>
+
+</main>

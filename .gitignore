@@ -16,3 +16,10 @@ dist/
 
 # docs/build-pdf.sh scratch (architecture.pdf itself is committed)
 docs/.build/
+
+# secrets
+.env
+
+# assignment2: the WildChat shard is 268 MB, and the labelled output is generated
+assignment2/*.parquet
+assignment2/prompt_smells.csv
