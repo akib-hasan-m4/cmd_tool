@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Label WildChat user prompts with the prompt smells from Prompt_Smells_1.pdf.
 
-Reads the parquet shard, pulls the first user message out of each conversation,
-asks a local Ollama model which prompt smells it carries, and writes
-conversation_id, user_prompt, smells to a CSV -- all in one run.
+Reads the parquet shard, takes every English user message (not just the first
+of each conversation), and asks two models which prompt smells it carries:
 
-    python analyze_prompt_smells.py --limit 100
+  * qwen3.5:0.8b through a local Ollama server (generative, JSON-constrained)
+  * Kev-0.8B through a local Kev server (one yes/no question per smell)
+
+Each message gets its own CSV row with one smell column per model. The run
+stops once --limit rows are in the CSV, counting rows kept by --resume.
+
+    python analyze_prompt_smells.py --limit 10000 --resume
 
 Taxonomy: Ronanki, Cabrero-Daniel & Berger (2024); Della Porta et al. (2026).
 """
@@ -19,6 +24,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Iterator, Set
+from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 
 import pyarrow.parquet as pq
@@ -188,6 +194,8 @@ For a prompt with no smells:
 {{"evidence": "Specific, self-contained request with a clear deliverable.", "smells": []}}"""
 
 
+
+
 # ---------------------------------------------------------------------------
 # Reading the parquet
 # ---------------------------------------------------------------------------
@@ -199,59 +207,58 @@ COLUMNS = ["conversation_id", "conversation"]
 
 BATCH_SIZE = 512
 
-
-def first_user_message(conversation: list[dict]) -> str | None:
-    """Return the first message with role 'user', or None if there isn't one."""
-    for message in conversation:
-        if message.get("role") == "user":
-            content = message.get("content")
-            if content and content.strip():
-                return content
-    return None
+# WildChat tags every message with its detected language.
+LANGUAGE = "English"
 
 
-def iter_first_user_prompts(
+class Message(NamedTuple):
+    conversation_id: str
+    user_turn: int  # 1-based position among the conversation's user messages
+    prompt: str
+
+
+def iter_user_messages(
     path: str,
     limit: int,
-    offset: int = 0,
-    skip_ids: Set[str] = frozenset(),
-) -> Iterator[tuple[str, str]]:
-    """Yield up to `limit` (conversation_id, prompt) pairs.
+    skip_keys: Set[tuple[str, int]] = frozenset(),
+    language: str = LANGUAGE,
+) -> Iterator[Message]:
+    """Yield up to `limit` user messages tagged `language`, in file order.
 
-    `offset` skips that many usable conversations from the start of the file;
-    `skip_ids` drops already-processed ids. Neither counts toward `limit`.
-    Stops reading as soon as `limit` is reached - the whole file is never read.
+    Every user message of a conversation is yielded, not only the first. A
+    message is identified by (conversation_id, user_turn); keys in `skip_keys`
+    are already done and do not count toward `limit`.
     """
+    if limit <= 0:
+        return
     parquet_file = pq.ParquetFile(path)
     yielded = 0
-    seen = 0
 
     for batch in parquet_file.iter_batches(batch_size=BATCH_SIZE, columns=COLUMNS):
         for row in batch.to_pylist():
-            prompt = first_user_message(row["conversation"] or [])
-            if prompt is None:
-                continue
-
             conversation_id = row["conversation_id"]
-            if conversation_id in skip_ids:
-                continue
+            user_turn = 0
+            for message in row["conversation"] or []:
+                if message.get("role") != "user":
+                    continue
+                user_turn += 1
+                content = message.get("content")
+                if not content or not content.strip():
+                    continue
+                if message.get("language") != language:
+                    continue
+                if (conversation_id, user_turn) in skip_keys:
+                    continue
 
-            seen += 1
-            if seen <= offset:
-                continue
-
-            yield conversation_id, prompt
-            yielded += 1
-            if yielded >= limit:
-                return
+                yield Message(conversation_id, user_turn, content)
+                yielded += 1
+                if yielded >= limit:
+                    return
 
 
 # ---------------------------------------------------------------------------
-# The Ollama call
+# Shared request settings
 # ---------------------------------------------------------------------------
-
-DEFAULT_HOST = "http://127.0.0.1:11434"
-DEFAULT_MODEL = "granite4.1:3b"
 
 # (connect, read). Generous on the read side: a cold model has to be pulled into
 # memory on the first call, which can take tens of seconds.
@@ -260,15 +267,10 @@ DEFAULT_TIMEOUT = (10, 600)
 MAX_RETRIES = 3
 BACKOFF_SECONDS = [2, 5, 10]
 
-# System prompt plus a long user prompt has to fit here. Ollama's default of 4096
-# would silently truncate the catalogue out of the window on longer prompts,
-# which is the kind of bug that shows up only as bad labels.
-NUM_CTX = 8192
-
 # WildChat contains pasted documents tens of thousands of characters long. The
 # smell is always visible in the opening stretch, and sending the rest only risks
-# pushing the instructions out of the context window. Only what the model sees is
-# truncated; the CSV keeps the full prompt.
+# pushing the instructions out of the context window. Only what the models see
+# is truncated; the CSV keeps the full prompt.
 MAX_PROMPT_CHARS = 4000
 
 # Recorded instead of raising when a call or its reply cannot be handled, so one
@@ -276,12 +278,60 @@ MAX_PROMPT_CHARS = 4000
 ERROR_UNPARSED = "ERROR: unparsed"
 ERROR_REQUEST = "ERROR: request failed"
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
-_OBJECT_RE = re.compile(r"\{.*?\}", re.DOTALL)
-
 
 class FatalAPIError(RuntimeError):
     """Raised for conditions no amount of retrying will fix (no such model)."""
+
+
+class ServerError(RuntimeError):
+    """A 5xx the caller asked to handle itself instead of retrying as-is."""
+
+
+def post_with_retries(
+    url: str, body: dict, timeout, what: str, raise_5xx: bool = False
+) -> dict | None:
+    """POST and return the JSON body, or None once the retries are spent.
+
+    A 404 means the model is not there, which retrying cannot fix. With
+    `raise_5xx`, a server error raises ServerError at once, because resending
+    the identical request would fail the identical way.
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(url, json=body, timeout=timeout)
+            if response.status_code == 404:
+                raise FatalAPIError(f"{what}: 404 from {url} - is the model loaded?")
+            if raise_5xx and response.status_code >= 500:
+                raise ServerError(f"{what}: {response.status_code} from {url}")
+            response.raise_for_status()
+            return response.json()
+        except (FatalAPIError, ServerError):
+            raise
+        except (requests.RequestException, ValueError) as exc:
+            if attempt == MAX_RETRIES - 1:
+                print(f"  {what}: giving up after {MAX_RETRIES} attempts: {exc}",
+                      file=sys.stderr)
+                return None
+            delay = BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)]
+            print(f"  {what}: {exc} - retrying in {delay}s", file=sys.stderr)
+            time.sleep(delay)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Ollama (qwen3.5:0.8b)
+# ---------------------------------------------------------------------------
+
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:0.8b"
+
+# System prompt plus a long user prompt has to fit here. Ollama's default of 4096
+# would silently truncate the catalogue out of the window on longer prompts,
+# which is the kind of bug that shows up only as bad labels.
+NUM_CTX = 8192
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def parse_reply(text: str) -> list[str]:
@@ -317,24 +367,14 @@ def parse_reply(text: str) -> list[str]:
     return smells
 
 
-def classify(
-    prompt: str,
-    *,
-    system_prompt: str,
-    host: str = DEFAULT_HOST,
-    model: str = DEFAULT_MODEL,
-    timeout: tuple[int, int] = DEFAULT_TIMEOUT,
-    max_retries: int = MAX_RETRIES,
-) -> list[str]:
-    """Classify one prompt. Returns the smell names found, possibly empty.
-
-    Raises FatalAPIError when the model simply is not there. Every other failure
-    degrades to a single-element error list so the caller can record it and move
-    on.
-    """
+def classify_ollama(prompt: str, *, system_prompt: str, host: str, model: str) -> list[str]:
+    """Classify one prompt with an Ollama model. Returns the smell names found."""
     body = {
         "model": model,
         "stream": False,
+        # Qwen3.5 thinks by default; that multiplies the latency for no gain on a
+        # schema-constrained label.
+        "think": False,
         "format": RESPONSE_SCHEMA,
         "options": {"temperature": 0, "num_ctx": NUM_CTX},
         "messages": [
@@ -342,37 +382,19 @@ def classify(
             {"role": "user", "content": prompt[:MAX_PROMPT_CHARS]},
         ],
     }
-    url = f"{host.rstrip('/')}/api/chat"
-
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(url, json=body, timeout=timeout)
-
-            if response.status_code == 404:
-                raise FatalAPIError(
-                    f"Ollama has no model {model!r}. Pull it with: ollama pull {model}"
-                )
-
-            response.raise_for_status()
-            return parse_reply(response.json()["message"]["content"])
-
-        except FatalAPIError:
-            raise
-        except (requests.RequestException, KeyError, ValueError) as exc:
-            if attempt == max_retries - 1:
-                print(f"  giving up after {max_retries} attempts: {exc}", file=sys.stderr)
-                return [ERROR_REQUEST]
-            delay = BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)]
-            print(f"  {exc} - retrying in {delay}s", file=sys.stderr)
-            time.sleep(delay)
-
-    return [ERROR_REQUEST]
+    reply = post_with_retries(f"{host}/api/chat", body, DEFAULT_TIMEOUT, "ollama")
+    if reply is None:
+        return [ERROR_REQUEST]
+    try:
+        return parse_reply(reply["message"]["content"])
+    except (KeyError, TypeError):
+        return [ERROR_UNPARSED]
 
 
 def check_ollama(host: str, model: str) -> None:
     """Fail fast with an actionable message if Ollama or the model is missing."""
     try:
-        response = requests.get(f"{host.rstrip('/')}/api/tags", timeout=10)
+        response = requests.get(f"{host}/api/tags", timeout=10)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise FatalAPIError(
@@ -388,29 +410,130 @@ def check_ollama(host: str, model: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Kev (Kev-0.8B)
+#
+# Kev does not generate text: it scores questions about a state. Each smell is
+# asked as its own yes/no (`noul`) question and a smell is reported when the
+# probability of yes reaches KEV_THRESHOLD. The raw probabilities go in their
+# own column so the threshold can be revisited without re-running.
+# ---------------------------------------------------------------------------
+
+DEFAULT_KEV_HOST = "http://127.0.0.1:8009"
+DEFAULT_KEV_MODEL = "kev-latest"
+KEV_THRESHOLD = 0.5
+
+KEV_QUESTIONS = {
+    f"smell_{i}": {
+        "type": "noul",
+        "instructions": f"Does this prompt show the prompt smell \"{s.name}\"? {s.cue}",
+    }
+    for i, s in enumerate(SMELLS)
+}
+KEV_QUESTION_SMELL = {f"smell_{i}": s.name for i, s in enumerate(SMELLS)}
+
+
+# Kev-0.8B in fp32 on a 6 GB card runs out of GPU memory on token-dense input:
+# Qwen tokenizes every digit separately, so 1,000 characters of binary is ~1,000
+# tokens, counted once per question. The server answers those with a 500, and
+# the prompt is halved until it fits. Below this length the row is an error.
+KEV_MIN_PROMPT_CHARS = 125
+
+# Added to kev_probabilities when the prompt had to be cut to fit.
+KEV_TRUNCATED_KEY = "_truncated_to_chars"
+
+
+def classify_kev(
+    prompt: str, *, host: str, model: str, threshold: float = KEV_THRESHOLD
+) -> tuple[list[str], dict[str, float] | None]:
+    """Classify one prompt with Kev. Returns (smells, probability per smell)."""
+    limit = MAX_PROMPT_CHARS
+    while True:
+        body = {
+            "model": model,
+            "state": {"prompt": prompt[:limit]},
+            "questions": KEV_QUESTIONS,
+        }
+        try:
+            reply = post_with_retries(f"{host}/v1/systemone", body, DEFAULT_TIMEOUT, "kev",
+                                      raise_5xx=True)
+            break
+        except ServerError as exc:
+            if min(limit, len(prompt)) // 2 < KEV_MIN_PROMPT_CHARS:
+                print(f"  {exc} - giving up at {min(limit, len(prompt))} chars",
+                      file=sys.stderr)
+                return [ERROR_REQUEST], None
+            limit = min(limit, len(prompt)) // 2
+            print(f"  {exc} - retrying with the first {limit} chars", file=sys.stderr)
+
+    if reply is None:
+        return [ERROR_REQUEST], None
+    try:
+        probs = {KEV_QUESTION_SMELL[k]: float(v["noul"]) for k, v in reply["answers"].items()}
+    except (KeyError, TypeError, ValueError):
+        return [ERROR_UNPARSED], None
+    smells = [s.name for s in SMELLS if probs.get(s.name, 0.0) >= threshold]
+    if limit < min(len(prompt), MAX_PROMPT_CHARS):
+        probs[KEV_TRUNCATED_KEY] = limit
+    return smells, probs
+
+
+def check_kev(host: str, model: str) -> None:
+    """Fail fast if the Kev server is down or does not serve `model`."""
+    try:
+        response = requests.get(f"{host}/v1/models", timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise FatalAPIError(
+            f"Cannot reach Kev at {host} ({exc}). Start it with: "
+            "python -m kev.serve --run jaredpalmer/kev-0.8b --port 8009"
+        ) from exc
+
+    models = response.json().get("models", [])
+    served = next((m for m in models if m.get("name") == model), None)
+    if served is None:
+        raise FatalAPIError(
+            f"Kev at {host} has no model {model!r}. "
+            f"Available: {', '.join(m.get('name', '?') for m in models) or '(none)'}"
+        )
+    print(f"kev: {served.get('run')} on {served.get('device')} ({served.get('dtype')})",
+          file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
-FIELDNAMES = ["conversation_id", "user_prompt", "smells"]
+FIELDNAMES = [
+    "conversation_id",
+    "user_turn",
+    "user_prompt",
+    "qwen_smells",
+    "kev_smells",
+    "kev_probabilities",
+]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parquet", default="train-00003-of-00006.parquet")
-    parser.add_argument("--out", default="prompt_smells.csv")
-    parser.add_argument("--limit", type=int, default=100, help="conversations to analyze")
-    parser.add_argument("--offset", type=int, default=0, help="conversations to skip first")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--out", default="prompt_smells_qwen_kev.csv")
     parser.add_argument(
-        "--host",
-        default=os.environ.get("OLLAMA_HOST", DEFAULT_HOST),
-        help=f"Ollama base URL (default: $OLLAMA_HOST or {DEFAULT_HOST})",
+        "--limit", type=int, default=10000,
+        help="stop once the CSV holds this many rows (one per message, both models)",
     )
-    parser.add_argument("--delay", type=float, default=0.0, help="seconds between calls")
+    parser.add_argument("--ollama-model", default=DEFAULT_OLLAMA_MODEL)
+    parser.add_argument(
+        "--ollama-host",
+        default=os.environ.get("OLLAMA_HOST", DEFAULT_OLLAMA_HOST),
+        help=f"Ollama base URL (default: $OLLAMA_HOST or {DEFAULT_OLLAMA_HOST})",
+    )
+    parser.add_argument("--kev-model", default=DEFAULT_KEV_MODEL)
+    parser.add_argument("--kev-host", default=os.environ.get("KEV_HOST", DEFAULT_KEV_HOST))
+    parser.add_argument("--kev-threshold", type=float, default=KEV_THRESHOLD)
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="append to an existing CSV, skipping conversation_ids already in it",
+        help="append to an existing CSV, skipping messages already in it",
     )
     parser.add_argument(
         "--self-test",
@@ -425,89 +548,126 @@ def normalize_host(host: str) -> str:
     if not host.startswith(("http://", "https://")):
         host = f"http://{host}"
     # 0.0.0.0 is a bind address, not somewhere you can send a request.
-    return host.replace("//0.0.0.0:", "//127.0.0.1:")
+    return host.replace("//0.0.0.0:", "//127.0.0.1:").rstrip("/")
 
 
-def load_done_ids(path: str) -> set[str]:
-    """conversation_ids already present in the output CSV."""
+def load_done_keys(path: str) -> set[tuple[str, int]]:
+    """(conversation_id, user_turn) pairs already present in the output CSV."""
     if not os.path.exists(path):
         return set()
     with open(path, newline="", encoding="utf-8") as handle:
-        return {row["conversation_id"] for row in csv.DictReader(handle)}
+        return {(row["conversation_id"], int(row["user_turn"]))
+                for row in csv.DictReader(handle)}
 
 
-def run_self_test(system_prompt: str, host: str, model: str) -> int:
-    """Feed each smelly example from the deck back through the classifier.
+def format_label(found: list[str]) -> str:
+    if any(s.startswith("ERROR") for s in found):
+        return found[0]
+    return "; ".join(found) if found else NO_SMELL
 
-    The deck is the ground truth, so this measures how well the system prompt
-    actually communicates the taxonomy to this particular model.
+
+def run_self_test(args, system_prompt: str) -> int:
+    """Feed each smelly example from the deck back through both classifiers.
+
+    The deck is the ground truth, so this measures how well each model picks up
+    the taxonomy.
     """
-    hits = 0
+    hits = Counter()
     for smell in SMELLS:
-        found = classify(smell.example, system_prompt=system_prompt, host=host, model=model)
-        hit = smell.name in found
-        hits += hit
-        print(f"{'PASS' if hit else 'MISS'}  {smell.name}")
-        print(f"      got: {'; '.join(found) if found else '(none)'}")
-    print(f"\n{hits}/{len(SMELLS)} examples labelled with their intended smell")
+        qwen = classify_ollama(smell.example, system_prompt=system_prompt,
+                               host=args.ollama_host, model=args.ollama_model)
+        kev, probs = classify_kev(smell.example, host=args.kev_host, model=args.kev_model,
+                                  threshold=args.kev_threshold)
+        hits["qwen"] += smell.name in qwen
+        hits["kev"] += smell.name in kev
+        p = f"{probs[smell.name]:.2f}" if probs else "n/a"
+        print(f"{smell.name}")
+        print(f"   qwen {'PASS' if smell.name in qwen else 'MISS'}: {format_label(qwen)}")
+        print(f"   kev  {'PASS' if smell.name in kev else 'MISS'} (p={p}): {format_label(kev)}")
+    print(f"\nqwen {hits['qwen']}/{len(SMELLS)}, kev {hits['kev']}/{len(SMELLS)} "
+          "examples labelled with their intended smell")
     return 0
 
 
 def main() -> int:
     args = parse_args()
-    host = normalize_host(args.host)
+    args.ollama_host = normalize_host(args.ollama_host)
+    args.kev_host = normalize_host(args.kev_host)
     system_prompt = build_system_prompt()
 
     try:
-        check_ollama(host, args.model)
+        check_ollama(args.ollama_host, args.ollama_model)
+        check_kev(args.kev_host, args.kev_model)
     except FatalAPIError as exc:
         print(f"fatal: {exc}", file=sys.stderr)
         return 1
 
     if args.self_test:
-        return run_self_test(system_prompt, host, args.model)
+        return run_self_test(args, system_prompt)
 
-    skip_ids: set[str] = set()
+    done: set[tuple[str, int]] = set()
     append = False
     if args.resume:
-        skip_ids = load_done_ids(args.out)
+        done = load_done_keys(args.out)
         append = os.path.exists(args.out)
-        if skip_ids:
-            print(f"resuming: skipping {len(skip_ids)} already-labelled conversations",
-                  file=sys.stderr)
+        if done:
+            print(f"resuming: {len(done)} messages already labelled", file=sys.stderr)
 
-    counts: Counter[str] = Counter()
+    remaining = args.limit - len(done)
+    if remaining <= 0:
+        print(f"{args.out} already holds {len(done)} rows (limit {args.limit}); nothing to do",
+              file=sys.stderr)
+        return 0
+
+    counts = {"qwen": Counter(), "kev": Counter()}
+    errors = Counter()
     written = 0
-    errors = 0
     started = time.time()
 
     handle = open(args.out, "a" if append else "w", newline="", encoding="utf-8")
+    # The two models sit on different servers, so each message's two calls run
+    # side by side rather than one after the other.
+    pool = ThreadPoolExecutor(max_workers=2)
     try:
         writer = csv.writer(handle)
         if not append:
             writer.writerow(FIELDNAMES)
             handle.flush()
 
-        prompts = iter_first_user_prompts(args.parquet, args.limit, args.offset, skip_ids)
-        for index, (conversation_id, prompt) in enumerate(prompts, 1):
-            if index > 1 and args.delay:
-                time.sleep(args.delay)
+        messages = iter_user_messages(args.parquet, remaining, done)
+        for index, msg in enumerate(messages, len(done) + 1):
+            qwen_future = pool.submit(
+                classify_ollama, msg.prompt, system_prompt=system_prompt,
+                host=args.ollama_host, model=args.ollama_model)
+            kev_future = pool.submit(
+                classify_kev, msg.prompt, host=args.kev_host, model=args.kev_model,
+                threshold=args.kev_threshold)
+            qwen = qwen_future.result()
+            kev, probs = kev_future.result()
 
-            found = classify(
-                prompt, system_prompt=system_prompt, host=host, model=args.model
-            )
-            if any(s.startswith("ERROR") for s in found):
-                errors += 1
-                label = found[0]
-            else:
-                label = "; ".join(found) if found else NO_SMELL
-                counts.update(found or [NO_SMELL])
+            for name, found in (("qwen", qwen), ("kev", kev)):
+                if any(s.startswith("ERROR") for s in found):
+                    errors[name] += 1
+                else:
+                    counts[name].update(found or [NO_SMELL])
 
             # Flush per row so a crash or Ctrl-C keeps what was earned.
-            writer.writerow([conversation_id, prompt, label])
+            writer.writerow([
+                msg.conversation_id,
+                msg.user_turn,
+                msg.prompt,
+                format_label(qwen),
+                format_label(kev),
+                json.dumps({k: round(v, 4) for k, v in probs.items()}) if probs else "",
+            ])
             handle.flush()
             written += 1
-            print(f"[{index}/{args.limit}] {conversation_id} -> {label}", file=sys.stderr)
+
+            rate = (time.time() - started) / written
+            print(f"[{index}/{args.limit}] {msg.conversation_id}#{msg.user_turn} "
+                  f"qwen={format_label(qwen)} | kev={format_label(kev)} "
+                  f"({rate:.2f}s/msg, eta {rate * (args.limit - index) / 60:.0f} min)",
+                  file=sys.stderr)
 
     except FatalAPIError as exc:
         print(f"\nfatal: {exc}", file=sys.stderr)
@@ -516,13 +676,16 @@ def main() -> int:
         print(f"\ninterrupted - {written} rows written to {args.out}", file=sys.stderr)
         return 130
     finally:
+        pool.shutdown(wait=False, cancel_futures=True)
         handle.close()
 
     elapsed = time.time() - started
-    print(f"\n{written} rows written to {args.out} in {elapsed:.0f}s ({errors} errors)",
-          file=sys.stderr)
-    for name, count in counts.most_common():
-        print(f"  {count:4d}  {name}", file=sys.stderr)
+    print(f"\n{written} rows written to {args.out} in {elapsed:.0f}s "
+          f"(errors: qwen {errors['qwen']}, kev {errors['kev']})", file=sys.stderr)
+    for name, counter in counts.items():
+        print(f"{name}:", file=sys.stderr)
+        for smell, count in counter.most_common():
+            print(f"  {count:5d}  {smell}", file=sys.stderr)
     return 0
 
 
