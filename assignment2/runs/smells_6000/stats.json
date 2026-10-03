@@ -1,0 +1,284 @@
+{
+ "n": 6000,
+ "prompts": {
+  "conversations": 2273,
+  "opening_turns": 2083,
+  "length_median": 151,
+  "length_p90": 1045,
+  "over_4000_chars": 146
+ },
+ "timing": {
+  "granite": {
+   "mean_s": 0.417,
+   "median_s": 0.318,
+   "p95_s": 0.915,
+   "hours": 0.69,
+   "shortened": 0,
+   "errors": 0
+  },
+  "qwen": {
+   "mean_s": 0.695,
+   "median_s": 0.658,
+   "p95_s": 1.186,
+   "hours": 1.16,
+   "shortened": 0,
+   "errors": 0
+  },
+  "tev1": {
+   "mean_s": 0.582,
+   "median_s": 0.557,
+   "p95_s": 0.96,
+   "hours": 0.97,
+   "shortened": 29,
+   "errors": 0
+  },
+  "kev": {
+   "mean_s": 0.33,
+   "median_s": 0.295,
+   "p95_s": 0.515,
+   "hours": 0.55,
+   "shortened": 0,
+   "errors": 0
+  }
+ },
+ "label_counts": {
+  "granite": {
+   "Vague / Missing Context": 2742,
+   "Ambiguous References": 5256,
+   "Format Ambiguity": 3886,
+   "Overloaded Prompt": 679,
+   "Prompt Bloat / Convoluted Prompt": 76,
+   "Unnecessary Repetition": 592,
+   "Conflicting Constraints": 592,
+   "Irrelevant / Excessive Persona": 64,
+   "Bias / Loaded Framing": 557,
+   "Formality / Audience Mismatch": 418,
+   "No Smell": 60
+  },
+  "qwen": {
+   "Vague / Missing Context": 4256,
+   "Ambiguous References": 1535,
+   "Format Ambiguity": 1966,
+   "Overloaded Prompt": 366,
+   "Prompt Bloat / Convoluted Prompt": 70,
+   "Unnecessary Repetition": 399,
+   "Conflicting Constraints": 146,
+   "Irrelevant / Excessive Persona": 55,
+   "Bias / Loaded Framing": 52,
+   "Formality / Audience Mismatch": 97,
+   "No Smell": 188
+  },
+  "tev1": {
+   "Vague / Missing Context": 1014,
+   "Ambiguous References": 4,
+   "Format Ambiguity": 75,
+   "Overloaded Prompt": 0,
+   "Prompt Bloat / Convoluted Prompt": 1,
+   "Unnecessary Repetition": 1,
+   "Conflicting Constraints": 0,
+   "Irrelevant / Excessive Persona": 0,
+   "Bias / Loaded Framing": 1,
+   "Formality / Audience Mismatch": 1,
+   "No Smell": 4903
+  },
+  "kev": {
+   "Vague / Missing Context": 656,
+   "Ambiguous References": 183,
+   "Format Ambiguity": 715,
+   "Overloaded Prompt": 145,
+   "Prompt Bloat / Convoluted Prompt": 4,
+   "Unnecessary Repetition": 348,
+   "Conflicting Constraints": 21,
+   "Irrelevant / Excessive Persona": 14,
+   "Bias / Loaded Framing": 5,
+   "Formality / Audience Mismatch": 15,
+   "No Smell": 3894
+  }
+ },
+ "generative": {
+  "granite": {
+   "mean_smells": 2.48,
+   "smelly_pct": 99.0,
+   "smells_per_prompt": {
+    "0": 60,
+    "1": 608,
+    "2": 4587,
+    "3": 149,
+    "4": 4,
+    "5": 14,
+    "6": 31,
+    "7": 122,
+    "8": 321,
+    "9": 101,
+    "10": 3
+   },
+   "seven_plus": 547,
+   "top_combinations": {
+    "Ambiguous References; Format Ambiguity": 43.9,
+    "Vague / Missing Context; Ambiguous References": 23.3,
+    "Vague / Missing Context; Format Ambiguity": 7.8
+   }
+  },
+  "qwen": {
+   "mean_smells": 1.49,
+   "smelly_pct": 96.9,
+   "smells_per_prompt": {
+    "0": 188,
+    "1": 2861,
+    "2": 2825,
+    "3": 96,
+    "4": 17,
+    "5": 8,
+    "6": 1,
+    "7": 3,
+    "8": 1
+   },
+   "seven_plus": 4,
+   "top_combinations": {
+    "Vague / Missing Context": 33.5,
+    "Vague / Missing Context; Format Ambiguity": 20.4,
+    "Vague / Missing Context; Ambiguous References": 9.1
+   }
+  }
+ },
+ "decision": {
+  "tev1": {
+   "top1_p_median": 0.516,
+   "top1_p_ge_05_pct": 54.2,
+   "gap_median": 0.294,
+   "gap_lt_005_pct": 7.9,
+   "labels_used": 8
+  },
+  "kev": {
+   "top1_p_median": 0.178,
+   "top1_p_ge_05_pct": 0.0,
+   "gap_median": 0.031,
+   "gap_lt_005_pct": 69.7,
+   "labels_used": 11
+  }
+ },
+ "smelly_pct": {
+  "granite": 99.0,
+  "qwen": 96.9,
+  "tev1": 18.3,
+  "kev": 35.1
+ },
+ "agreement_any_smell": {
+  "granite-qwen": {
+   "pct": 96.0,
+   "kappa": 0.026
+  },
+  "granite-tev1": {
+   "pct": 18.9,
+   "kappa": -0.0
+  },
+  "granite-kev": {
+   "pct": 35.3,
+   "kappa": -0.002
+  },
+  "qwen-tev1": {
+   "pct": 20.0,
+   "kappa": -0.004
+  },
+  "qwen-kev": {
+   "pct": 37.3,
+   "kappa": 0.02
+  },
+  "tev1-kev": {
+   "pct": 62.8,
+   "kappa": 0.084
+  }
+ },
+ "granite_qwen_per_smell": {
+  "Vague / Missing Context": {
+   "pct": 48.0,
+   "kappa": -0.003
+  },
+  "Ambiguous References": {
+   "pct": 31.7,
+   "kappa": 0.001
+  },
+  "Format Ambiguity": {
+   "pct": 48.3,
+   "kappa": 0.062
+  },
+  "Overloaded Prompt": {
+   "pct": 84.8,
+   "kappa": 0.049
+  },
+  "Prompt Bloat / Convoluted Prompt": {
+   "pct": 97.6,
+   "kappa": 0.002
+  },
+  "Unnecessary Repetition": {
+   "pct": 85.3,
+   "kappa": 0.032
+  },
+  "Conflicting Constraints": {
+   "pct": 88.3,
+   "kappa": 0.01
+  },
+  "Irrelevant / Excessive Persona": {
+   "pct": 98.1,
+   "kappa": 0.024
+  },
+  "Bias / Loaded Framing": {
+   "pct": 90.0,
+   "kappa": 0.001
+  },
+  "Formality / Audience Mismatch": {
+   "pct": 91.6,
+   "kappa": 0.001
+  }
+ },
+ "granite_qwen_sets": {
+  "exact_pct": 7.2,
+  "jaccard_mean": 0.298
+ },
+ "tev1_kev_top1": {
+  "same_pct": 58.0,
+  "both_name_smell": 487,
+  "agree_when_both_pct": 40.2
+ },
+ "decision_smell_in_generative_list": {
+  "tev1_in_granite": 40.2,
+  "tev1_in_qwen": 64.6,
+  "kev_in_granite": 52.5,
+  "kev_in_qwen": 44.3
+ },
+ "by_length": {
+  "<=50": {
+   "prompts": 1278,
+   "qwen_vague": 76.1,
+   "granite_seven_plus": 6.1,
+   "tev1_smelly": 15.8,
+   "kev_smelly": 28.0
+  },
+  "51-150": {
+   "prompts": 1718,
+   "qwen_vague": 79.0,
+   "granite_seven_plus": 3.8,
+   "tev1_smelly": 19.2,
+   "kev_smelly": 33.1
+  },
+  "151-500": {
+   "prompts": 1844,
+   "qwen_vague": 74.9,
+   "granite_seven_plus": 12.3,
+   "tev1_smelly": 13.1,
+   "kev_smelly": 36.6
+  },
+  ">500": {
+   "prompts": 1160,
+   "qwen_vague": 46.9,
+   "granite_seven_plus": 15.3,
+   "tev1_smelly": 27.9,
+   "kev_smelly": 43.5
+  }
+ },
+ "qwen_repeatability": {
+  "prompts": 6000,
+  "exact_pct": 43.4,
+  "jaccard_mean": 0.606
+ }
+}

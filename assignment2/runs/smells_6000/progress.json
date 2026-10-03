@@ -1,0 +1,44 @@
+{
+  "models": {
+    "granite": {
+      "status": "done",
+      "model": "granite4:350m",
+      "done": 6000,
+      "total": 6000,
+      "errors": 0,
+      "s_per_prompt": 0.419,
+      "eta_min": 0
+    },
+    "qwen": {
+      "status": "done",
+      "model": "qwen3.5:0.8b",
+      "done": 6000,
+      "total": 6000,
+      "errors": 0,
+      "s_per_prompt": 0.699,
+      "eta_min": 0
+    },
+    "tev1": {
+      "status": "done",
+      "model": "tev1:0.8b",
+      "done": 6000,
+      "total": 6000,
+      "errors": 0,
+      "s_per_prompt": 0.585,
+      "eta_min": 0
+    },
+    "kev": {
+      "status": "done",
+      "model": "kev-latest",
+      "done": 6000,
+      "total": 6000,
+      "errors": 0,
+      "s_per_prompt": 0.332,
+      "eta_min": 0
+    }
+  },
+  "current": "kev",
+  "heartbeat": 1790988522.5988023,
+  "updated": "2026-10-03 06:48:42",
+  "finished": "2026-10-03 06:48:42"
+}
